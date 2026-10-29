@@ -1,0 +1,6 @@
+{
+  "appId": "id.legend.offline",
+  "appName": "Become a Legend",
+  "webDir": "www",
+  "android": { "allowMixedContent": false, "backgroundColor": "#0d141b" }
+}

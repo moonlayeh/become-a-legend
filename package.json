@@ -1,0 +1,15 @@
+{
+  "name": "become-a-legend-offline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:match": "node test/match-test.mjs",
+    "test:season": "node test/season-test.mjs IDN Makassar ST 7 2"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/cli": "^8.6.0",
+    "@capacitor/core": "^8.6.0"
+  }
+}
