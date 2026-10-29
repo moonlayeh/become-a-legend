@@ -57,7 +57,7 @@ const blankLine = () => ({ gls: 0, ast: 0, sh: 0, sot: 0, pas: 0, pasc: 0, kp: 0
 export function simulateMatch(rng, home, away, opts = {}) {
   const rec = !!opts.record;
   const S = [makeSide(home, 0, 1.035), makeSide(away, 1, 1)];
-  const frames = [], events = [];
+  const frames = [], events = [], shots = [];
   let half = 1, t = 0, clock = 0; // t: seconds in half, clock: absolute seconds for replay
   let poss = 0, carrier = null, bx = 52.5, by = 34; // ball in absolute coordinates
   let restart = { type: "kick", team: rng.chance(0.5) ? 0 : 1 };
@@ -170,11 +170,12 @@ export function simulateMatch(rng, home, away, opts = {}) {
     let pGoal = base * (0.36 + q * 0.8) * (1.32 - gq * 0.66);
     pGoal = clamp(pGoal, 0.003, type === "pen" ? 0.92 : 0.8);
     T.t.sh++; sh.s.sh++; T.t.xg += base * 0.8;
+    const SR = { t: clock, side: poss, xg: +(base * 0.8).toFixed(3), pid: sh.p.id, kind: type, x: +F.x.toFixed(1), y: +F.y.toFixed(1), r: "off" }; shots.push(SR);
     if (lastPass && lastPass.o !== sh && lastPass.side === poss) lastPass.o.s.kp++;
     // blocked?
     if (type === "open" && d > 10 && rng.chance(0.24)) {
       const blk = pickPlayer(1 - poss, o => DEF.has(o.pos) || o.pos === "DM", o => sk(o, [["pos",2],["bra",2],["ant",1]]));
-      rec_("shot", { r: "blk" }); tick(3);
+      SR.r = "blk"; rec_("shot", { r: "blk" }); tick(3);
       if (rng.chance(0.45)) { S[poss].t.cor++; restart = { type: "corner", team: poss }; }
       else { const c = fromF(poss, F.x - rng.float(6, 18), F.y + rng.float(-10, 10)); contest(c.x, c.y); }
       return;
@@ -191,14 +192,14 @@ export function simulateMatch(rng, home, away, opts = {}) {
         // error blame occasionally
         ev("goal", scorerSide, sh, { ast: ast ? ast.p.id : null, kind: type });
         const gpos = fromF(poss, L, 34 + rng.float(-3, 3));
-        bx = gpos.x; by = gpos.y; rec_("goal", { r: "goal" });
+        SR.r = "goal"; bx = gpos.x; by = gpos.y; rec_("goal", { r: "goal" });
         tick(45 + rng.int(0, 25));
         restart = { type: "kick", team: 1 - scorerSide };
         return;
       }
       g.s.sav++;
       const gp = fromF(poss, L - 1, by);
-      rec_("shot", { r: "save" }); tick(3);
+      SR.r = "save"; rec_("shot", { r: "save" }); tick(3);
       if (rng.chance(0.3)) { T.t.cor++; restart = { type: "corner", team: poss }; return; }
       if (rng.chance(0.14) && type !== "fk") { // rebound
         const c = fromF(poss, 96 + rng.float(-3, 2), 34 + rng.float(-8, 8));
@@ -524,7 +525,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
   }
 
   // ===== ratings =====
-  const res = { score: [S[0].t.gls, S[1].t.gls], teams: S.map(s => ({ ...s.t, pos: 0 })), players: {}, events, frames, lineups: null };
+  const res = { score: [S[0].t.gls, S[1].t.gls], teams: S.map(s => ({ ...s.t, pos: 0 })), players: {}, events, frames, shots, lineups: null };
   const posTot = S[0].t.pos + S[1].t.pos;
   res.teams[0].pos = Math.round(S[0].t.pos / posTot * 100); res.teams[1].pos = 100 - res.teams[0].pos;
   for (const sd of S) {

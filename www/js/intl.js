@@ -3,7 +3,7 @@ import { clamp } from "./rng.js";
 import { NATIONS } from "./data.js";
 import { ymd, day, ageOn, seasonOf, fmt } from "./calendar.js";
 import { addMail, addNews, userP, INTL_WINDOWS } from "./world.js";
-import { ntFor, selectNational, posGroup } from "./career.js";
+import { ntFor, selectNational, posGroup, fed, decision } from "./career.js";
 import { fullName } from "./player.js";
 
 const TOURS = [
@@ -41,12 +41,12 @@ export function intlDay(G, rng) {
   const { y, m, d } = ymd(G.date);
   // tournaments
   for (const T of TOURS) {
-    if (T.month === m && T.start === d && T.years(y) && (T.conf === "ALL" || (T.conf === "AFF" ? AFF.has(p.nat) : NATIONS[p.nat].conf === T.conf))) startTournament(G, rng, T);
+    if (T.month === m && T.start === d && T.years(y) && (T.conf === "ALL" || (T.conf === "AFF" ? AFF.has(fed(G)) : NATIONS[fed(G)].conf === T.conf))) startTournament(G, rng, T);
   }
   // regular windows
   for (const [wm, wd] of INTL_WINDOWS) {
     if (wm === m && wd === d && !G.camp) {
-      if (m === 6 && TOURS.some(T => T.month === 6 && T.years(y) && (T.conf === "ALL" || NATIONS[p.nat].conf === T.conf))) continue;
+      if (m === 6 && TOURS.some(T => T.month === 6 && T.years(y) && (T.conf === "ALL" || NATIONS[fed(G)].conf === T.conf))) continue;
       startWindow(G, rng);
     }
   }
@@ -56,7 +56,7 @@ export function intlDay(G, rng) {
 function callUp(G, team) {
   const p = userP(G);
   if (p.injury) return null;
-  const squad = selectNational(G, p.nat, team);
+  const squad = selectNational(G, fed(G), team);
   return squad.some(q => q.id === p.id) ? squad : null;
 }
 
@@ -64,8 +64,8 @@ function startWindow(G, rng) {
   const p = userP(G);
   const team = ntFor(G, p);
   const squad = callUp(G, team);
-  const nat = p.nat;
-  if (!squad) {
+  const nat = fed(G);
+  if (!squad) { offerSwitch(G, team);
     if (team.youth || p.ca > team.level - 20) G.user.lastSnub = G.date;
     return;
   }
@@ -80,7 +80,7 @@ function startWindow(G, rng) {
 }
 
 function startTournament(G, rng, T) {
-  const p = userP(G), nat = p.nat, lv = NATIONS[nat].level;
+  const p = userP(G), nat = fed(G), lv = NATIONS[nat].level;
   const y = ymd(G.date).y;
   const team = { name: "Senior", max: 99, level: lv, youth: false };
   if (ageOn(p.birth, G.date) < 17) return;
@@ -165,4 +165,33 @@ export function endCamp(G) {
 export function campMatchToday(G) {
   const c = G.camp; if (!c) return null;
   return c.matches.find(mt => mt.d === G.date && !mt.done) || null;
+}
+
+// ---------- dual nationality: FIFA eligibility (Regulations Governing the Application of the Statutes, art. 9) ----------
+// A player may change association once if: he has played no more than 3 official A-level matches,
+// all before turning 21, none at a final tournament, and at least 3 years have passed since the last one.
+export function canSwitch(G) {
+  const u = G.user, p = userP(G);
+  if (!p.nat2 || u.switched) return { ok: false, why: u.switched ? "Kamu sudah pernah pindah federasi." : "Kamu tidak punya kewarganegaraan kedua." };
+  const comp = (u.int.senior || []).filter(m => m.official);
+  if (!comp.length) return { ok: true };
+  if (comp.length > 3) return { ok: false, why: "Sudah lebih dari 3 laga resmi senior." };
+  if (comp.some(m => m.age >= 21)) return { ok: false, why: "Pernah tampil di laga resmi senior setelah usia 21." };
+  if (comp.some(m => m.tour)) return { ok: false, why: "Pernah tampil di putaran final turnamen." };
+  const last = Math.max(...comp.map(m => m.date));
+  if (G.date - last < 3 * 365) return { ok: false, why: "Belum 3 tahun sejak laga resmi terakhir." };
+  return { ok: true };
+}
+function offerSwitch(G, team) {
+  const p = userP(G), u = G.user;
+  if (!p.nat2 || u.switchOffered === ymd(G.date).y) return;
+  const other = fed(G) === p.nat ? p.nat2 : p.nat;
+  if (!canSwitch(G).ok) return;
+  const squad = selectNational(G, other, { ...team, level: team.youth ? NATIONS[other].level * (team.level / NATIONS[fed(G)].level) : NATIONS[other].level }, true);
+  if (!squad.some(q => q.id === p.id)) return;
+  u.switchOffered = ymd(G.date).y;
+  decision(G, `Federasi ${NATIONS[other].name} menghubungimu`, `Pelatih timnas ${NATIONS[other].name} ingin memanggilmu. Kamu memenuhi syarat FIFA untuk pindah federasi (hanya boleh sekali). Laga timnas usia muda tidak mengikat.`, [
+    { label: `Bela ${NATIONS[other].name}`, detail: "Panggilan berikutnya datang dari federasi ini.", act: "switchFed", data: { to: other } },
+    { label: `Tetap ${NATIONS[fed(G)].name}`, detail: "Tolak dengan sopan.", act: "none" },
+  ]);
 }

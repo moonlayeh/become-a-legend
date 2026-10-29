@@ -7,23 +7,32 @@ import { simulateMatch } from "./match.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day } from "./calendar.js";
 import {
   userP, userClub, pickTeam, quickSim, applyLine, developPlayer, makeFixtures, addMail, addNews, table,
-  genSenior, genYouth, fifaU18Allowed, leagueNation, INTL_WINDOWS, clubNatOK,
+  genSenior, genYouth, fifaU18Allowed, leagueNation, INTL_WINDOWS, clubNatOK, createWorld,
 } from "./world.js";
 import {
   weeklyCareer, monthlyCareer, monthlyReport, playShare, seasonAwards, userSeasonEnd, endLoan, userContractExpiry,
   squadStatus, selectNational, nationalLineup, ntFor, decision,
 } from "./career.js";
 import { intlDay, campMatchToday, afterIntlMatch } from "./intl.js";
+import { staffOf } from "./meta.js";
+const staffOfLite = (G, cid) => (G.clubs[cid] ? staffOf(G, cid)[0].name : "");
 
+export function newCareer(f) {
+  const G = createWorld(f);
+  const rng = rngOf(G);
+  seasonPreviews(G, rng);
+  G.rs = rng.s;
+  return G;
+}
 export function rngOf(G) { const r = new RNG(1); r.s = G.rs; return r; }
 const ids = t => ({ club: t.club, name: t.name, formation: t.formation, xi: t.xi.map(p => p.id), bench: t.bench.map(p => p.id) });
 const fromIds = (G, t) => ({ ...t, xi: t.xi.map(id => G.players[id]).filter(Boolean), bench: t.bench.map(id => G.players[id]).filter(Boolean) });
 
-export function continueGame(G) {
+export function continueGame(G, maxDays = 45) {
   const rng = rngOf(G);
   const mailBefore = G.mailId || 0;
   let stop = null;
-  for (let i = 0; i < 45 && !stop; i++) {
+  for (let i = 0; i < maxDays && !stop; i++) {
     if (G.user.retired) { stop = "retired"; break; }
     if (G.pending) { stop = "match"; break; }
     if (G.inbox.some(m => m.kind === "decision" && !m.done)) { stop = "decision"; break; }
@@ -151,7 +160,7 @@ export function playPending(G, record) {
   const u = userP(G);
   const { H, A: Aw } = pendingTeams(G);
   // the user's own slot: make sure they're used if selected
-  const res = simulateMatch(rng, H, Aw, { record });
+  const res = simulateMatch(rng, H, Aw, { record: true });
   let comp = pd.comp;
   if (pd.kind === "liga") {
     const L = G.leagues[pd.league];
@@ -163,7 +172,7 @@ export function playPending(G, record) {
     const line = res.players[u.id];
     if (line) {
       applyLine(G, rng, u, line, pd.kind === "u19" ? "u19" : "timnas", true);
-      if (pd.kind === "timnas") { G.user.int.apps++; G.user.int.gls += line.gls; G.user.int.ast += line.ast; if (!pd.youth && !G.camp?.youth) { u.caps = (u.caps || 0) + 1; u.intGoals = (u.intGoals || 0) + line.gls; if (!G.user.debut) G.user.debut = { date: G.date, opp: pd.match.opp }; } else { const k = G.camp.team; G.user.int.youth[k] = (G.user.int.youth[k] || 0) + 1; } }
+      if (pd.kind === "timnas") { G.user.int.apps++; G.user.int.gls += line.gls; G.user.int.ast += line.ast; if (!pd.youth && !G.camp?.youth) { (G.user.int.senior = G.user.int.senior || []).push({ date: G.date, nat: G.camp.nat, official: !/Uji Coba/.test(pd.comp), tour: !!G.camp.tour, age: ageOn(u.birth, G.date) }); u.caps = (u.caps || 0) + 1; u.intGoals = (u.intGoals || 0) + line.gls; if (!G.user.debut) G.user.debut = { date: G.date, opp: pd.match.opp }; } else { const k = G.camp.team; G.user.int.youth[k] = (G.user.int.youth[k] || 0) + 1; } }
       if (pd.kind === "u19") trackMinutes(G, line.min);
     } else if (pd.kind === "u19") trackMinutes(G, 0);
     if (pd.kind === "timnas") {
@@ -180,7 +189,21 @@ export function playPending(G, record) {
     events: res.events.map(e => ({ ...e, name: e.pid ? nameOf(e.pid) : "", astId: e.ast, ast: e.ast ? nameOf(e.ast) : null, offId: e.off, off: e.off ? nameOf(e.off) : null })),
     lines: Object.entries(res.players).map(([id, l]) => ({ id: +id, name: nameOf(id), ...l })).sort((a, b) => a.side - b.side || (b.start - a.start) || 0),
     user: res.players[u.id] || null, pens: pd.match?.pens || null,
+    ...matchCharts(res),
+    lineups: res.lineups.map((l, side) => ({ formation: l.formation, start: l.start.map(s => ({ ...s, name: nameOf(s.id), no: numOf(G, s.id, [H, Aw][side]) })) })),
+    venue: pd.kind === "timnas" ? "" : pd.kind === "u19" ? "Lapangan Akademi" : `Kandang ${H.name}`,
+    homeShort: shortOfTeam(G, H), awayShort: shortOfTeam(G, Aw),
+    benches: [H, Aw].map(t => t.bench.map(p => ({ id: p.id, name: shortName(p), no: numOf(G, p.id, t), pos: p.main }))),
+    managers: [H, Aw].map(t => managerOf(G, t)),
   };
+  summary.shots.forEach(sh => (sh.name = nameOf(sh.pid)));
+  const myLine = summary.user;
+  if (myLine) {
+    const mySide = myLine.side;
+    (G.user.matchLog = G.user.matchLog || []).unshift({ date: G.date, comp, opp: mySide === 0 ? Aw.name : H.name, ha: mySide === 0 ? "K" : "T", score: mySide === 0 ? res.score : [res.score[1], res.score[0]], rating: myLine.rating, min: myLine.min, gls: myLine.gls, ast: myLine.ast, pom: res.pom === u.id });
+    if (G.user.matchLog.length > 30) G.user.matchLog.length = 30;
+  }
+  if (pd.kind === "liga") matchReport(G, summary, H, Aw);
   G.lastMatch = summary;
   if (pd.kind === "liga" && summary.user) {
     const r = summary.user.rating;
@@ -190,13 +213,121 @@ export function playPending(G, record) {
   if (record) {
     const all = [...H.xi, ...H.bench, ...Aw.xi, ...Aw.bench];
     const info = {};
-    [H, Aw].forEach((t, side) => [...t.xi, ...t.bench].forEach((p, i) => (info[p.id] = { name: shortName(p), num: i + 1, side, user: !!p.isUser })));
+    [H, Aw].forEach((t, side) => [...t.xi, ...t.bench].forEach(p => (info[p.id] = { name: shortName(p), num: numOf(G, p.id, t), side, user: !!p.isUser })));
     const shortOf = t => G.clubs[t.club]?.short || (t.nat ? t.nat : t.name.slice(0, 3).toUpperCase());
-    replay = { frames: res.frames, lineups: res.lineups, events: summary.events, info, colors: [summary.home.colors, summary.away.colors], names: [H.name, Aw.name], short: [shortOf(H), shortOf(Aw)] };
+    replay = { frames: res.frames, lineups: summary.lineups, events: summary.events, shots: summary.shots, info, colors: [summary.home.colors, summary.away.colors], names: [H.name, Aw.name], short: [shortOf(H), shortOf(Aw)], lines: summary.lines, h2: summary.h2 };
   }
   G.pending = null;
   G.rs = rng.s;
   return { summary, replay };
+}
+
+// ---------- match charts: momentum and xG story ----------
+export function matchCharts(res) {
+  const F = res.frames;
+  const h2f = F.find(f => f.k === "half" && f.h === 2);
+  const h2 = h2f ? h2f.t : 2800;
+  const toMin = t => (t < h2 ? t / 60 : 45 + (t - h2) / 60);
+  const B = 18, mom = new Array(B * 2).fill(0);
+  for (let i = 0; i < F.length - 1; i++) {
+    const a = F[i], b = F[i + 1];
+    const dt = b.t - a.t; if (dt <= 0 || dt > 120) continue;
+    const right = (a.s === 0) === (a.h === 1);
+    const depth = right ? a.x / 105 : (105 - a.x) / 105;
+    const v = Math.max(0, depth - 0.45) * dt * (a.s === 0 ? 1 : -1);
+    const half = a.h === 2 ? 1 : 0;
+    const k = Math.min(B - 1, Math.floor(((a.t - (half ? h2 : 0)) / 60) / (45 / B)));
+    mom[half * B + Math.max(0, k)] += v;
+  }
+  for (const sh of res.shots) {
+    const half = sh.t >= h2 ? 1 : 0;
+    const k = Math.min(B - 1, Math.floor(((sh.t - (half ? h2 : 0)) / 60) / (45 / B)));
+    mom[half * B + Math.max(0, k)] += (sh.side === 0 ? 1 : -1) * (sh.xg * 260 + (sh.r === "goal" ? 90 : 0));
+  }
+  const mx = Math.max(1, ...mom.map(Math.abs));
+  return {
+    momentum: mom.map(v => +(v / mx).toFixed(2)),
+    shots: res.shots.map(s => ({ ...s, min: +toMin(s.t).toFixed(1) })),
+    h2,
+  };
+}
+function managerOf(G, t) {
+  if (t.nat) return "Pelatih timnas";
+  return staffOfLite(G, t.club);
+}
+const shortOfTeam = (G, t) => G.clubs[t.club]?.short || t.nat || t.name.slice(0, 3).toUpperCase();
+export function numOf(G, id, team) {
+  const p = G.players[id] || [...team.xi, ...team.bench].find(q => q.id === id);
+  if (!p) return "";
+  if (p.virtual || !G.clubs[p.club] || (team && team.nat)) { const i = [...team.xi, ...team.bench].indexOf(p); return i + 1; }
+  return shirtNumber(G, p);
+}
+// Squad numbers: kept per club; senior squad takes 1–35, academy 36–69
+export function shirtNumber(G, p) {
+  if (p.no && p.noClub === p.club) return p.no;
+  const club = G.clubs[p.club]; if (!club) return "";
+  const used = new Set([...club.squad, ...club.youthSquad].map(id => G.players[id]).filter(q => q && q.noClub === club.id && q.id !== p.id).map(q => q.no));
+  const PREF = { GK: [1, 13, 25, 31], DR: [2, 12, 22], DL: [3, 15, 23], DC: [4, 5, 6, 15, 24, 26], WBR: [2, 12], WBL: [3, 18], DM: [6, 16, 21], MC: [8, 14, 16, 18, 20], MR: [7, 17], ML: [11, 19], AMR: [7, 17, 27], AML: [11, 19, 29], AMC: [10, 20, 28], ST: [9, 19, 29, 30] };
+  let n = null;
+  if (p.squad === "A") n = (PREF[p.main] || []).find(x => !used.has(x)) ?? [...Array(35).keys()].map(i => i + 1).find(x => !used.has(x));
+  if (n == null) n = [...Array(34).keys()].map(i => i + 36).find(x => !used.has(x)) ?? 99;
+  p.no = n; p.noClub = club.id;
+  return n;
+}
+
+// ---------- news ----------
+function matchReport(G, S, H, Aw) {
+  const u = userP(G);
+  const mine = S.home.club === u.club ? 0 : 1;
+  const [a, b] = S.score;
+  const my = mine === 0 ? a : b, th = mine === 0 ? b : a;
+  const verb = my > th ? (my - th >= 3 ? "pesta gol" : "menang") : my < th ? "takluk" : "imbang";
+  const me = S.user;
+  const scorers = S.events.filter(e => e.type === "goal").map(e => `${e.name} (${e.min}')`).join(", ");
+  addNews(G, {
+    title: my > th ? `${[S.home, S.away][mine].name} ${verb} ${my}-${th} atas ${[S.home, S.away][1 - mine].name}` : my < th ? `${[S.home, S.away][mine].name} takluk ${my}-${th} dari ${[S.home, S.away][1 - mine].name}` : `${S.home.name} dan ${S.away.name} bermain imbang ${a}-${b}`,
+    body: `${S.comp}: ${S.home.name} ${a}-${b} ${S.away.name}.${scorers ? " Gol: " + scorers + "." : ""}${me ? ` ${fullName(u)} bermain ${me.min} menit dengan rating ${me.rating.toFixed(1)}${me.gls ? ` dan mencetak ${me.gls} gol` : ""}.` : ""} Pemain terbaik: ${S.pomName}.`,
+    tag: "Laporan Laga", club: u.club, scope: "me",
+  });
+}
+const PREVIEW = {
+  top: ["Juara lagi?", "Target gelar", "Siap merebut mahkota"], euro: ["Malam-malam Eropa kembali?", "Mengincar zona Eropa", "Bidik empat besar"],
+  mid: ["Solid dan stabil", "Persiapan yang tenang", "Mencari konsistensi"], low: ["Misi bertahan", "Musim yang berat menanti", "Berjuang menjauhi zona merah"],
+};
+export function seasonPreviews(G, rng) {
+  const u = userP(G);
+  for (const L of Object.values(G.leagues)) {
+    const ranked = L.teams.slice().sort((a, b) => G.clubs[b].level - G.clubs[a].level);
+    const picks = new Set([ranked[0], ranked[1], rng.pick(ranked.slice(4))]);
+    if (G.clubs[u.club]?.league === L.id) picks.add(u.club);
+    for (const id of picks) {
+      const c = G.clubs[id], rank = ranked.indexOf(id) + 1, n = ranked.length;
+      const band = rank <= 2 ? "top" : rank <= 6 ? "euro" : rank <= n - 4 ? "mid" : "low";
+      addNews(G, {
+        title: `Pratinjau Musim ${c.short === c.name ? c.name : c.name.replace(/^(FC|AC|AS|RC|CA|SC|RCD|UD|CF|AJ|OGC|LOSC|SV|VfL|VfB|TSG|1\. FC|1\. FSV|FC)\s/, "")}: ${rng.pick(PREVIEW[band])}`,
+        body: `${c.name} diprediksi finis di posisi ke-${rank} ${L.name} musim ${seasonLabel(G.season)}. ${band === "top" ? "Skuad mereka dianggap salah satu yang terkuat di liga." : band === "euro" ? "Mereka punya modal untuk bersaing di papan atas." : band === "mid" ? "Target realistisnya finis di papan tengah." : "Bertahan di liga akan menjadi prioritas utama."}`,
+        tag: "Media", club: id, scope: id === u.club ? "me" : "world", league: L.id,
+      });
+    }
+  }
+}
+function rumours(G, rng) {
+  if (!rng.chance(0.5)) return;
+  const stars = Object.values(G.players).filter(p => p.squad === "A" && !p.isUser && p.ca >= 140 && G.clubs[p.club] && G.leagues[G.clubs[p.club].league]);
+  if (!stars.length) return;
+  const p = rng.pick(stars), from = G.clubs[p.club];
+  const buyers = Object.values(G.clubs).filter(c => G.leagues[c.league] && c.id !== from.id && c.level >= p.ca - 5);
+  if (!buyers.length) return;
+  const to = rng.pick(buyers);
+  addNews(G, { title: `${to.short} incar ${p.fn[0]}. ${p.ln}`, body: `${to.name} disebut-sebut berminat merekrut ${fullName(p)} dari ${from.name}, menurut spekulasi media terbaru.`, tag: "Rumor Transfer", club: to.id, scope: "transfer" });
+}
+export function trainingRating(G, rng) {
+  const u = userP(G);
+  const inten = { Rendah: -0.25, Normal: 0, Tinggi: 0.2 }[G.user.training.intensity] || 0;
+  const r = 6.2 + (u.hid.pro - 10) * 0.05 + (u.a[A.det] - 10) * 0.04 + (u.a[A.wor] - 10) * 0.03 + inten + rng.normal(0, 0.28) - (u.injury ? 1 : 0);
+  const v = Math.round(clamp(r, 5, 9.5) * 100) / 100;
+  (G.user.trainRatings = G.user.trainRatings || []).push(v);
+  if (G.user.trainRatings.length > 12) G.user.trainRatings.shift();
 }
 
 // ---------- calendar ----------
@@ -208,7 +339,7 @@ function nextDay(G, rng) {
     if (p.sharp > 0) p.sharp = Math.max(0, p.sharp - 0.35);
     if (p.injury) {
       p.injury.days--;
-      if (p.injury.days <= 0) { p.injury = null; p.cond = 70; if (p.isUser) addMail(G, "Pulih dari cedera", "Tim medis menyatakan kamu sudah fit dan siap dipilih lagi.", "good"); }
+      if (p.injury.days <= 0) { p.injury = null; p.cond = 70; p.backOn = G.date; if (p.isUser) addMail(G, "Pulih dari cedera", "Tim medis menyatakan kamu sudah fit dan siap dipilih lagi.", "good", { cat: "Cedera" }); }
     }
   }
   if (u.favour && G.user.favourUntil && G.date > G.user.favourUntil) u.favour = 0;
@@ -219,8 +350,8 @@ function nextDay(G, rng) {
   if (m === 6 && d === 1) endSeason(G, rng);
   if (m === 7 && d === 1) newSeason(G, rng);
   if (m === 3 && d === 15) youthIntake(G, rng);
-  if ((m === 9 && d === 1) || (m === 2 && d === 1)) addNews(G, "Jendela transfer resmi ditutup.");
-  if ((m === 7 && d === 1) || (m === 1 && d === 1)) addNews(G, "Jendela transfer dibuka.");
+  if ((m === 9 && d === 1) || (m === 2 && d === 1)) addNews(G, { title: "Jendela transfer resmi ditutup", tag: "Transfer", scope: "transfer" });
+  if ((m === 7 && d === 1) || (m === 1 && d === 1)) addNews(G, { title: "Jendela transfer dibuka", tag: "Transfer", scope: "transfer" });
 }
 
 function weekly(G, rng) {
@@ -232,13 +363,15 @@ function weekly(G, rng) {
     if (!u.injury && rng.chance(0.006 * inten * (0.6 + u.hid.inj / 20) * (G.user.difficulty === "Keras" ? 1.3 : 1))) {
       const days = rng.int(3, 18);
       u.injury = { name: "Cedera ringan saat latihan", days, total: days };
-      addMail(G, "Cedera di latihan", `Kamu cedera ringan saat latihan dan absen sekitar ${days} hari.`, "bad");
+      addMail(G, "Cedera di latihan", `Kamu cedera ringan saat latihan dan absen sekitar ${days} hari.`, "bad", { cat: "Cedera" });
+      G.user.injuries.push({ date: G.date, name: u.injury.name, days });
     }
     if (G.user.training.intensity === "Tinggi") u.cond = Math.max(60, u.cond - 4);
+    trainingRating(G, rng);
     weeklyCareer(G, rng);
   }
   const { m } = ymd(G.date);
-  if (m === 7 || m === 8 || m === 1) aiTransfers(G, rng);
+  if (m === 7 || m === 8 || m === 1) { aiTransfers(G, rng); rumours(G, rng); }
 }
 
 function monthly(G, rng) {
@@ -272,7 +405,7 @@ function aiTransfers(G, rng) {
     genSenior(G, rng, from, p.main, from.level - 3 + rng.normal(0, 5), from.policy === "basque" ? "ESP" : undefined);
     moves++;
     const u = userP(G);
-    if (to.id === u.club || from.id === u.club || p.ca >= 145) addNews(G, `${to.name} merekrut ${fullName(p)} dari ${from.name}.`);
+    if (to.id === u.club || from.id === u.club || p.ca >= 135) addNews(G, { title: `${to.short} rekrut ${fullName(p)}`, body: `${to.name} merekrut ${fullName(p)} (${ageOn(p.birth, G.date)} tahun) dari ${from.name}.`, tag: "Transfer", club: to.id, scope: to.id === u.club || from.id === u.club ? "me" : "transfer" });
     trim(G, to);
   }
 }
@@ -339,7 +472,8 @@ function newSeason(G, rng) {
   for (const L of Object.values(G.leagues)) makeFixtures(G, rng, L, G.season);
   for (const p of Object.values(G.players)) { p.st = newStats(); p.ycCount = 0; p.ban = Math.min(p.ban || 0, 1); }
   G.user.renewOffered = false;
-  G.user.tourWin = G.user.tourWin;
+  for (const c of Object.values(G.clubs)) c.injCount = 0;
+  seasonPreviews(G, rng);
   addMail(G, `Musim ${seasonLabel(G.season)} dimulai`, `Jadwal ${G.leagues[userClub(G).league]?.name || "liga"} sudah keluar. Laga pertama pertengahan Agustus. Statusmu di skuad: ${squadStatus(G)}.`, "info");
 }
 
@@ -355,7 +489,7 @@ function youthIntake(G, rng) {
       club.youthSquad = club.youthSquad.filter(id => id !== worst.id); delete G.players[worst.id];
     }
   }
-  if (userP(G).squad === "Y") addNews(G, `${userClub(G).short} menerima angkatan baru pemain akademi.`);
+  if (userP(G).squad === "Y") addNews(G, { title: `Angkatan baru akademi ${userClub(G).short}`, body: `${userClub(G).name} menerima angkatan baru pemain muda di akademi.`, tag: "Klub", club: userClub(G).id, scope: "me" });
 }
 
 export function retireUser(G) {

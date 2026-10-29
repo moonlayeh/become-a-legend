@@ -36,5 +36,6 @@ Lalu buka http://localhost:8000.
 - `www/js/match.js`: mesin laga; `viewer.js`: papan 2D
 - `www/js/world.js`, `sim.js`: dunia, jadwal, kalender, perkembangan
 - `www/js/career.js`, `intl.js`: karier, kontrak, transfer, timnas, penghargaan
-- `www/js/app.js`, `css/app.css`: tampilan sementara (akan diganti per layar)
+- `www/js/meta.js`: data turunan untuk tampilan (peran, reputasi, jadwal latihan, staf, kategori pesan)
+- `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, kompetisi), `match.js` (persiapan, laga 2D, hasil), `create.js` (menu utama, pembuatan pemain)
 - `test/`: uji kalibrasi laga dan simulasi beberapa musim

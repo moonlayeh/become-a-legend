@@ -82,6 +82,7 @@ export function genPlayer(rng, o) {
   const weight = Math.round(height - 105 + rng.normal(0, 4) - Math.max(0, 18 - age) * 2);
   let foot = rng.chance(0.74) ? "Kanan" : rng.chance(0.85) ? "Kiri" : "Dua kaki";
   if (["DL", "WBL", "ML", "AML"].includes(pos) && rng.chance(0.5)) foot = "Kiri";
+  const wf = foot === "Dua kaki" ? rng.int(15, 19) : Math.round(clamp(rng.normal(8, 3.5), 1, 16));
   const a = shapeAttributes(rng, pos, o.ca, age);
   if (height > 188) { a[A.jum] = clamp(a[A.jum] + 1.5, 1, 20); a[A.hea] = clamp(a[A.hea] + 1, 1, 20); a[A.agi] = clamp(a[A.agi] - 1, 1, 20); }
   const hid = {
@@ -90,7 +91,7 @@ export function genPlayer(rng, o) {
   };
   const p = {
     id: o.id, fn, ln, nat: o.nat, birth: o.birth, birthplace: o.birthplace || "",
-    club: o.club, squad: o.squad || "A", main: pos, positions, foot, height, weight,
+    club: o.club, squad: o.squad || "A", main: pos, positions, foot, wf, height, weight,
     a, ca: 0, pa: o.pa, hid, cond: 100, sharp: 60, morale: 65, injury: null, ban: 0,
     contract: null, form: [], st: newStats(), caps: 0, intGoals: 0, retired: false,
   };

@@ -5,9 +5,13 @@ import { NATIONS, LEAGUES } from "./data.js";
 import { A, ATTRS } from "./attributes.js";
 import { genPlayer, slotRating, marketValue, fairWage, fullName, newStats } from "./player.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day } from "./calendar.js";
-import { addMail, addNews, userP, userClub, table, fifaU18Allowed, birthForAge, newCompStats, clubNatOK } from "./world.js";
+import { addMail, addNews, userP, userClub, table, fifaU18Allowed, birthForAge, newCompStats, clubNatOK, needsLanguage } from "./world.js";
 
 const avg = a => a.reduce((s, x) => s + x, 0) / (a.length || 1);
+// nationality that counts for a club in country `cn` (dual nationals use the matching one)
+export const natFor = (p, cn) => (p.nat2 && p.nat2 === cn ? p.nat2 : p.nat);
+// the national federation the user currently represents
+export const fed = G => G.user.fed || G.players[G.user.pid].nat;
 export const inWindow = n => { const { m } = ymd(n); return m === 7 || m === 8 || m === 1; };
 
 // ---------- squad status ----------
@@ -85,6 +89,15 @@ export function monthlyCareer(G, rng) {
   const expected = p.squad === "Y" ? 0.5 : { "Pemain Kunci": 0.85, "Pemain Inti": 0.7, "Pemain Rotasi": 0.4, "Prospek Tim Utama": 0.3 }[squadStatus(G)] ?? 0.15;
   p.morale = clamp(Math.round((p.morale ?? 65) * 0.6 + (55 + (share - expected) * 60 + ((p.form.length ? avg(p.form.slice(-5)) : 6.8) - 6.8) * 20) * 0.4), 10, 100);
 
+  // settling in: a new language takes about ten months
+  if (G.user.adapt) {
+    p.morale = clamp(p.morale - 4, 10, 100);
+    if (G.date - G.user.adapt.since > 300) {
+      (p.langs = p.langs || []).push(G.user.adapt.lang);
+      addMail(G, "Bahasa baru", `Kamu kini cukup fasih berbahasa ${G.user.adapt.lang}. Beradaptasi dengan kehidupan di klub jadi jauh lebih mudah.`, "good", { cat: "Pribadi" });
+      G.user.adapt = null;
+    }
+  }
   // youth → first team
   if (p.squad === "Y") {
     const thr = firstTeamThreshold(G, club);
@@ -126,9 +139,9 @@ export function weeklyCareer(G, rng) {
   if (G.inbox.some(x => x.kind === "decision" && !x.done && /transfer|pinjam/i.test(x.tag || ""))) return;
   const share = playShare(G);
   // loans
-  if (!G.user.loan && age <= 21 && (p.squad === "A" ? share < 0.25 : p.ca > firstTeamThreshold(G, club) - 22 && age >= 17) && rng.chance(G.user.wantLoan ? 0.45 : 0.18)) {
+  if (!G.user.loan && age <= 21 && (p.squad === "A" ? share < 0.25 : p.ca > firstTeamThreshold(G, club) - (age >= 18 ? 38 : 26) && age >= 17) && rng.chance(G.user.wantLoan ? 0.45 : 0.2)) {
     const nat = G.clubs[p.club].nation;
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 10 && c.level >= p.ca - 12 && fifaU18Allowed(p.nat, age, c.nation).ok && clubNatOK(c, p.nat));
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 8 && c.level >= p.ca - 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
     if (cands.length) {
       const c = rng.pick(cands);
       decision(G, "Tawaran peminjaman", `${c.name} (${G.leagues[c.league].name}) ingin meminjammu sampai akhir musim. ${club.name} setuju karena ingin kamu mendapat menit bermain.`, [
@@ -142,7 +155,7 @@ export function weeklyCareer(G, rng) {
   const value = marketValue(p, G.date, club.league);
   const appeal = ((p.form.length ? avg(p.form.slice(-8)) : 6.6) - 6.6) * 0.15 + (p.ca - club.level) / 60 + (G.user.listed ? 0.25 : 0) + (age <= 23 ? 0.05 : 0);
   if (p.squad === "A" && !G.user.loan && rng.chance(clamp(0.05 + appeal, 0.02, 0.35))) {
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(p.nat, age, c.nation).ok && clubNatOK(c, p.nat));
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
     if (!cands.length) return;
     const c = rng.weighted(cands, c => c.level);
     const fee = Math.round(value * rng.float(0.85, 1.4) * 10) / 10;
@@ -157,7 +170,7 @@ export function weeklyCareer(G, rng) {
       ], "transfer");
     } else {
       addMail(G, "Tawaran ditolak klub", `${club.name} menolak tawaran €${fmtM(fee)} dari ${c.name} untukmu. Kamu dianggap terlalu penting untuk dilepas.`, "info");
-      addNews(G, `${club.short} menolak tawaran ${c.short} untuk ${fullName(p)}.`);
+      addNews(G, { title: `${club.short} tolak tawaran ${c.short} untuk ${fullName(p)}`, body: `${club.name} menolak tawaran €${fmtM(fee)} dari ${c.name}. Klub menganggap ${fullName(p)} terlalu penting untuk dilepas.`, tag: "Rumor Transfer", club: c.id, scope: "me" });
     }
   }
 }
@@ -176,7 +189,7 @@ function promote(G, why) {
   if (!club.squad.includes(p.id)) club.squad.push(p.id);
   p.squad = "A";
   addMail(G, "Naik ke tim utama", why + " Mulai sekarang kamu berlatih dan bersaing bersama skuad senior.", "good");
-  addNews(G, `${club.short} mempromosikan ${fullName(p)} ke tim utama.`);
+  addNews(G, { title: `${fullName(p)} naik ke tim utama ${club.short}`, body: `${club.name} mempromosikan ${fullName(p)} dari akademi ke skuad senior. Staf pelatih menilai ia siap bersaing untuk menit bermain.`, tag: "Klub", club: club.id, scope: "me" });
 }
 
 // ---------- decisions ----------
@@ -196,7 +209,7 @@ export function resolveDecision(G, mailId, idx, rng) {
       p.contract = { end: season + d.years, wage: d.wage };
       G.user.renewOffered = false;
       msg = `Kontrak ditandatangani sampai ${seasonLabel(p.contract.end)}.`;
-      addNews(G, `${fullName(p)} menandatangani kontrak baru dengan ${club.short}.`);
+      addNews(G, { title: `${fullName(p)} teken kontrak baru`, body: `${fullName(p)} menandatangani kontrak baru bersama ${club.name} hingga ${seasonLabel(p.contract.end)}.`, tag: "Kontrak", club: club.id, scope: "me" });
       break;
     case "negotiate":
       if (rng.chance(G.user.difficulty === "Keras" ? 0.45 : 0.65)) {
@@ -225,6 +238,11 @@ export function resolveDecision(G, mailId, idx, rng) {
       doTransfer(G, d.to, 0, d.wage, d.years);
       msg = `Kamu bergabung dengan ${G.clubs[d.to].name} secara gratis.`;
       break;
+    case "switchFed":
+      G.user.fed = d.to; G.user.switched = true;
+      msg = `Kamu kini membela ${NATIONS[d.to].name}.`;
+      addNews(G, { title: `${fullName(p)} pilih ${NATIONS[d.to].name}`, body: `${fullName(p)} resmi memilih membela timnas ${NATIONS[d.to].name} setelah FIFA menyetujui perpindahan federasi.`, tag: "Timnas", scope: "me" });
+      break;
     case "retire":
       G.user.retired = true; G.user.retiredOn = G.date;
       msg = "Kamu mengumumkan pensiun. Terima kasih untuk semua kenangannya.";
@@ -242,10 +260,11 @@ export function doTransfer(G, to, fee, wage, years) {
   p.club = to; p.squad = "A"; dest.squad.push(p.id);
   p.contract = { end: seasonOf(G.date) + years, wage };
   G.user.listed = false; G.user.leaving = false; G.user.renewOffered = false; G.user.wantLoan = false; G.user.minutes8 = [];
+  { const l = needsLanguage(p, dest); G.user.adapt = l ? { lang: l, since: G.date } : null; }
   p.favour = 0;
   G.user.moves = G.user.moves || [];
   G.user.moves.push({ date: G.date, from: from.id, to, fee, type: "transfer" });
-  addNews(G, `${dest.name} merekrut ${fullName(p)} dari ${from.name}${fee ? ` (€${fmtM(fee)})` : " (gratis)"}.`);
+  addNews(G, { title: `${dest.short} resmi rekrut ${fullName(p)}`, body: `${dest.name} merekrut ${fullName(p)} dari ${from.name}${fee ? ` dengan biaya €${fmtM(fee)}` : " secara gratis"}. Kontraknya berlaku ${years} tahun.`, tag: "Transfer", club: to, scope: "me", fee });
 }
 export function doLoan(G, to) {
   const p = userP(G), from = G.clubs[p.club], dest = G.clubs[to];
@@ -253,9 +272,10 @@ export function doLoan(G, to) {
   G.user.loan = { parent: from.id, wasYouth: p.squad === "Y", until: seasonOf(G.date) + 1 };
   p.club = to; p.squad = "A"; dest.squad.push(p.id);
   G.user.wantLoan = false; G.user.minutes8 = [];
+  { const l = needsLanguage(p, dest); G.user.adapt = l ? { lang: l, since: G.date } : null; }
   G.user.moves = G.user.moves || [];
   G.user.moves.push({ date: G.date, from: from.id, to, fee: 0, type: "loan" });
-  addNews(G, `${fullName(p)} dipinjamkan ${from.short} ke ${dest.name}.`);
+  addNews(G, { title: `${fullName(p)} dipinjamkan ke ${dest.short}`, body: `${from.name} meminjamkan ${fullName(p)} ke ${dest.name} hingga akhir musim agar mendapat menit bermain.`, tag: "Transfer", club: dest.id, scope: "me" });
 }
 export function endLoan(G) {
   const p = userP(G), L = G.user.loan; if (!L) return;
@@ -327,13 +347,14 @@ export function talk(G, topic, rng) {
 export const YOUTH_NT = [["U-17", 16, 0.66], ["U-19", 18, 0.75], ["U-21", 20, 0.85]];
 export function ntFor(G, p) {
   const age = ageOn(p.birth, G.date);
-  for (const [name, max, k] of YOUTH_NT) if (age <= max) return { name, max, level: NATIONS[p.nat].level * k, youth: true };
-  return { name: "Senior", max: 99, level: NATIONS[p.nat].level, youth: false };
+  const n = p.isUser ? fed(G) : p.nat;
+  for (const [name, max, k] of YOUTH_NT) if (age <= max) return { name, max, level: NATIONS[n].level * k, youth: true };
+  return { name: "Senior", max: 99, level: NATIONS[n].level, youth: false };
 }
 // Build a national squad from the database plus generated players based abroad.
-export function nationalSquad(G, nat, team) {
+export function nationalSquad(G, nat, team, forceUser = false) {
   const age = p => ageOn(p.birth, G.date);
-  const pool = Object.values(G.players).filter(p => p.nat === nat && !p.retired && !p.injury && (team.youth ? age(p) <= team.max : age(p) >= 17));
+  const pool = Object.values(G.players).filter(p => (p.isUser ? forceUser || fed(G) === nat : p.nat === nat) && !p.retired && !p.injury && (team.youth ? age(p) <= team.max : age(p) >= 17));
   const season = seasonOf(G.date);
   const r = new RNG(hash(nat + team.name + season));
   const virt = [];
@@ -351,8 +372,8 @@ export function nationalSquad(G, nat, team) {
 const hash = s => { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
 
 const QUOTA = { GK: 3, DEF: 8, MID: 8, ATT: 6 };
-export function selectNational(G, nat, team) {
-  const all = nationalSquad(G, nat, team);
+export function selectNational(G, nat, team, forceUser = false) {
+  const all = nationalSquad(G, nat, team, forceUser);
   const by = { GK: [], DEF: [], MID: [], ATT: [] };
   const score = p => p.ca * (1 + ((p.form.length ? avg(p.form.slice(-6)) : 6.8) - 6.8) * 0.03);
   for (const p of all) by[posGroup(p.main)].push(p);
@@ -392,8 +413,8 @@ export function seasonAwards(G) {
     const tots = [];
     for (const [g, n] of [["GK", 1], ["DEF", 4], ["MID", 3], ["ATT", 3]]) tots.push(...elig.filter(p => posGroup(p.main) === g).sort((a, b) => ar(b) - ar(a)).slice(0, n).map(p => p.id));
     res.leagues[L.id] = { champion: tb[0].id, runnerUp: tb[1].id, topScorer: topScorer?.id, topGoals: topScorer?.st.gls, potm: potm?.id, young: young?.id, tots };
-    L.history.push({ season, champion: tb[0].id, runnerUp: tb[1].id, topScorer: topScorer?.id, topGoals: topScorer?.st.gls, potm: potm?.id });
-    addNews(G, `${G.clubs[tb[0].id].name} juara ${L.name} ${seasonLabel(season)}.`);
+    L.history.push({ season, champion: tb[0].id, runnerUp: tb[1].id, topScorer: topScorer?.id, topGoals: topScorer?.st.gls, potm: potm?.id, table: tb.map(r => [r.id, r.pts]) });
+    addNews(G, { title: `${G.clubs[tb[0].id].name} juara ${L.name}`, body: `${G.clubs[tb[0].id].name} menutup musim ${seasonLabel(season)} sebagai juara ${L.name} dengan ${tb[0].pts} poin, unggul ${tb[0].pts - tb[1].pts} poin atas ${G.clubs[tb[1].id].name}.`, tag: "Kompetisi", club: tb[0].id, league: L.id });
   }
   // global awards
   const coef = { ENG1: 1, ESP1: 1, ITA1: 0.95, GER1: 0.95, FRA1: 0.9, IDN1: 0.35 };
@@ -411,7 +432,7 @@ export function seasonAwards(G) {
   const shoe = all.map(p => ({ p, s: p.st.gls * (G.clubs[p.club].league === "IDN1" ? 1 : 2) })).sort((a, b) => b.s - a.s);
   res.global.shoe = shoe[0]?.p.id;
   G.lastAwards = res;
-  addNews(G, `Bola Emas ${season + 1}: ${fullName(G.players[res.global.ballon[0]])} (${G.clubs[G.players[res.global.ballon[0]].club].short}).`);
+  addNews(G, { title: `Bola Emas ${season + 1}: ${fullName(G.players[res.global.ballon[0]])}`, body: `${fullName(G.players[res.global.ballon[0]])} (${G.clubs[G.players[res.global.ballon[0]].club].name}) dinobatkan sebagai pemain terbaik dunia.`, tag: "Penghargaan", club: G.players[res.global.ballon[0]].club });
   return res;
 }
 
@@ -456,7 +477,7 @@ export function userContractExpiry(G, rng) {
   if (G.user.loan) return;
   if (p.contract.end > season) return;
   const age = ageOn(p.birth, G.date);
-  const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 12 && c.level >= p.ca - 25 && fifaU18Allowed(p.nat, age, c.nation).ok && clubNatOK(c, p.nat));
+  const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 12 && c.level >= p.ca - 25 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
   const picks = rng.shuffle(cands).slice(0, 6).sort((a, b) => b.level - a.level).slice(0, 3);
   if (!picks.length) { p.contract = { end: season + 1, wage: fairWage(p, userClub(G).league) }; addMail(G, "Kontrak diperpanjang", "Tidak ada klub lain yang serius, jadi kamu menandatangani kontrak baru 1 musim dengan klubmu.", "info"); return; }
   decision(G, "Kamu pemain bebas", `Kontrakmu dengan ${userClub(G).name} habis. Beberapa klub menawarimu kontrak:`, picks.map(c => {

@@ -1,6 +1,6 @@
 // Plays several seasons automatically and prints a sanity report.
-import { createWorld, table, userP } from "../www/js/world.js";
-import { continueGame, playPending, rngOf } from "../www/js/sim.js";
+import { table, userP } from "../www/js/world.js";
+import { continueGame, playPending, rngOf, newCareer } from "../www/js/sim.js";
 import { resolveDecision, squadStatus } from "../www/js/career.js";
 import { serialize, deserialize } from "../www/js/save.js";
 import { fmt, ageOn } from "../www/js/calendar.js";
@@ -9,7 +9,7 @@ import { fullName } from "../www/js/player.js";
 const opts = { fn: "Bima", ln: "Saputra", nat: process.argv[2] || "IDN", birthplace: process.argv[3] || "Makassar", age: 16, pos: process.argv[4] || "ST", foot: "Kanan", difficulty: "Normal", club: "acak", seed: +(process.argv[5] || 7) };
 const seasons = +(process.argv[6] || 3);
 let t0 = Date.now();
-let G = createWorld(opts);
+let G = newCareer(opts);
 console.log("world built ms", Date.now() - t0, "players", Object.keys(G.players).length, "club", G.clubs[userP(G).club].name, "CA/PA", userP(G).ca, userP(G).pa);
 t0 = Date.now();
 const stops = {};
