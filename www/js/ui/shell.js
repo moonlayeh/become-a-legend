@@ -6,6 +6,8 @@ import { continueGame } from "../sim.js";
 import { saveGame } from "../save.js";
 import { mailMeta, clubMatchDays, userMatchDays, sessionsFor, SESS, SESS_COLOR } from "../meta.js";
 import { fullName } from "../player.js";
+import { NATIONS } from "../data.js";
+import { fed } from "../career.js";
 
 export const S = { G: null, sec: "portal", tab: "ringkasan", p: {}, screens: {}, drawer: false };
 const ICON = {
@@ -18,23 +20,29 @@ const ICON = {
   latihan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3M18 12h3M6 8v8M18 8v8M9 10v4M15 10v4M9 12h6"/></svg>',
   klub: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/></svg>',
   kompetisi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10v4a5 5 0 0 1-10 0zM5 5H3v2a3 3 0 0 0 3 3M19 5h2v2a3 3 0 0 1-3 3M12 13v4M8 21h8"/></svg>',
+  timnas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/></svg>',
+  cari: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
+  staf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>',
   pengaturan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
   karier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
 };
 export { ICON };
 
 export const SECTIONS = {
-  portal: { label: "Portal", tabs: [["ringkasan", "Ringkasan"], ["pesan", "Pesan"], ["kalender", "Kalender"], ["berita", "Berita"], ["kompetisi", "Kompetisi"]] },
-  pemain: { label: "Pemain", tabs: [["ringkasan", "Ringkasan"], ["pribadi", "Pribadi"], ["kontrak", "Kontrak"], ["performa", "Performa"], ["karier", "Karier"], ["bandingkan", "Bandingkan"]] },
+  portal: { label: "Portal", tabs: [["ringkasan", "Ringkasan"], ["pesan", "Pesan"], ["kalender", "Kalender"], ["berita", "Berita"], ["kompetisi", "Kompetisi"], ["kontak", "Kontak"]] },
+  pemain: { label: "Pemain", tabs: [["ringkasan", "Ringkasan"], ["pribadi", "Pribadi"], ["kontrak", "Kontrak"], ["transfer", "Transfer"], ["pengembangan", "Pengembangan"], ["performa", "Performa"], ["karier", "Karier"], ["bandingkan", "Perbandingan"]] },
   skuad: { label: "Skuad", tabs: [["utama", "Tim Utama"], ["muda", "Akademi U-19"]] },
   latihan: { label: "Latihan", tabs: [["sesi", "Sesi Latihan"], ["individu", "Latihan Individu"], ["kalender", "Kalender Latihan"], ["medis", "Pusat Medis"]] },
   klub: { label: "Klub", tabs: [["ringkasan", "Ringkasan"], ["staf", "Staf"], ["sejarah", "Sejarah"]] },
   kompetisi: { label: "Kompetisi", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["statistik", "Statistik"], ["sejarah", "Sejarah"]], compTabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["tahap", "Tahap"], ["sejarah", "Sejarah"]] },
   laga: { label: "Laga", tabs: [] },
   pengaturan: { label: "Pengaturan", tabs: [["umum", "Umum"]] },
+  timnas: { label: "Tim Nasional", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"]] },
+  cari: { label: "Rekrutmen", tabs: [["pemain", "Database Pemain"]] },
+  staf: { label: "Staf", tabs: [["profil", "Profil"]] },
 };
-const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"], ["pengaturan", "Pengaturan"]];
-export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal" };
+const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"], ["timnas", "Tim Nasional"], ["cari", "Database Pemain"], ["pengaturan", "Pengaturan"]];
+export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal", moments: "normal", momentTimer: 8 };
 export function applySettings(G) {
   G.settings = { ...DEFAULT_SETTINGS, ...(G.settings || {}) };
   setCurrency(G.settings.currency);
@@ -109,6 +117,7 @@ export function render(opt = {}) {
   let secLabel = sec.label;
   if (S.sec === "pemain") secLabel = S.p.pid && S.p.pid !== u.id ? shortN(G.players[S.p.pid]) : "Profil Saya";
   if (S.sec === "klub") secLabel = (G.clubs[S.p.club] || club).short;
+  if (S.sec === "timnas") secLabel = NATIONS[S.p.nat || fed(G)]?.name || "Timnas";
   if (S.sec === "kompetisi") secLabel = S.p.comp ? (S.p.comp === "NL" ? "UNL" : G.comps[S.p.comp]?.short || "Kompetisi") : G.leagues[S.p.league || club.league]?.short || "Kompetisi";
   const tabs = S.sec === "kompetisi" && S.p.comp ? sec.compTabs : sec.tabs;
   // notification counts: unread mail, open decisions, unseen news about you

@@ -3,7 +3,7 @@ import { RNG, clamp } from "./rng.js";
 import { NATIONS } from "./data.js";
 import { A } from "./attributes.js";
 import { fullName, shortName, newStats, fairWage } from "./player.js";
-import { simulateMatch } from "./match.js";
+import { simulateMatch, matchGen, FORMATIONS } from "./match.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day, nextWeekday } from "./calendar.js";
 import {
   userP, userClub, pickTeam, quickSim, applyLine, developPlayer, makeFixtures, addMail, addNews, table,
@@ -246,17 +246,56 @@ export function teamColors(G, t) {
   return G.clubs[t.club]?.colors || ["#888", "#fff"];
 }
 
+// the player's mindset from the team talk nudges his attributes for this match only
+const MINDSET_ATTRS = { Termotivasi: { wor: 1.5, agg: 1.5, sta: 0.5 }, Fokus: { cmp: 1.5, dec: 1, cnt: 1 }, Santai: { fla: 1.5, vis: 0.5, cmp: 0.5 } };
+function withMind(G, u, fn) {
+  const MIND = MINDSET_ATTRS[G.pending?.mind];
+  if (!MIND) return fn();
+  const keep = u.a.slice();
+  for (const [k, v] of Object.entries(MIND)) u.a[A[k]] = Math.min(20, u.a[A[k]] + v);
+  try { return fn(); } finally { u.a = keep; }
+}
 export function playPending(G, record) {
   const rng = rngOf(G);
   const pd = G.pending; if (!pd) return null;
   const u = userP(G);
   const { H, A: Aw } = pendingTeams(G);
-  // the player's mindset from the team talk nudges his attributes for this match only
-  const MIND = { Termotivasi: { wor: 1.5, agg: 1.5, sta: 0.5 }, Fokus: { cmp: 1.5, dec: 1, cnt: 1 }, Santai: { fla: 1.5, vis: 0.5, cmp: 0.5 } }[pd.mind];
-  const keep = u.a.slice();
-  if (MIND) for (const [k, v] of Object.entries(MIND)) u.a[A[k]] = Math.min(20, u.a[A[k]] + v);
-  const res = simulateMatch(rng, H, Aw, { record: true });
-  u.a = keep;
+  const res = withMind(G, u, () => simulateMatch(rng, H, Aw, { record: true }));
+  return finishPending(G, rng, H, Aw, res, record);
+}
+// Interactive match: the screen steps the engine and answers the user's key moments.
+export function startLiveMatch(G) {
+  const rng = rngOf(G);
+  const pd = G.pending; if (!pd) return null;
+  const u = userP(G);
+  const { H, A: Aw } = pendingTeams(G);
+  const rate = G.settings?.moments || "normal";
+  const interactive = rate !== "mati" && ["XI", "Cadangan"].includes(pd.role);
+  const sink = { frames: [], events: [], shots: [] };
+  const gen = matchGen(rng, H, Aw, { record: true, interactive, userId: u.id, momentRate: rate, sink });
+  const info = {};
+  [H, Aw].forEach((t, side) => [...t.xi, ...t.bench].forEach(p => (info[p.id] = { name: shortName(p), full: fullName(p), num: numOf(G, p.id, t), side, user: !!p.isUser })));
+  const shortOf = t => G.clubs[t.club]?.short || (t.nat ? t.nat : t.name.slice(0, 3).toUpperCase());
+  const lineups = [H, Aw].map(t => { const f = FORMATIONS[t.formation] || FORMATIONS["4-3-3"]; return { formation: t.formation, start: t.xi.map((p, i) => ({ id: p.id, pos: f[i][0], sx: f[i][1], sy: f[i][2], name: shortName(p), no: numOf(G, p.id, t) })) }; });
+  const ctx = { rng, H, Aw, gen, moment: null, res: null, interactive, R: { frames: sink.frames, events: sink.events, shots: sink.shots, lineups, info, colors: [teamColors(G, H), teamColors(G, Aw)], names: [H.name, Aw.name], short: [shortOf(H), shortOf(Aw)], lines: [], live: true } };
+  stepLive(G, ctx, undefined);
+  return ctx;
+}
+// advance the engine to the next key moment (or the final whistle); choice answers the previous moment
+export function stepLive(G, ctx, choice) {
+  const u = userP(G);
+  const r = withMind(G, u, () => ctx.gen.next(choice));
+  if (r.done) { ctx.res = r.value; ctx.moment = null; }
+  else ctx.moment = r.value;
+  return r;
+}
+// finish a live match: answer the remaining moments automatically, then apply the result
+export function endLiveMatch(G, ctx) {
+  while (!ctx.res) stepLive(G, ctx, null);
+  return finishPending(G, ctx.rng, ctx.H, ctx.Aw, ctx.res, true);
+}
+function finishPending(G, rng, H, Aw, res, record) {
+  const pd = G.pending, u = userP(G);
   let comp = pd.comp, fx = null, src = null;
   if (pd.kind === "liga" || pd.kind === "comp") {
     src = pd.kind === "liga" ? G.leagues[pd.league] : G.comps[pd.cid];
@@ -298,6 +337,7 @@ export function playPending(G, record) {
     homeShort: shortOfTeam(G, H), awayShort: shortOfTeam(G, Aw),
     benches: [H, Aw].map(t => t.bench.map(p => ({ id: p.id, name: shortName(p), no: numOf(G, p.id, t), pos: p.main }))),
     managers: [H, Aw].map(t => managerOf(G, t)),
+    decisions: res.decisions || [],
   };
   summary.shots.forEach(sh => (sh.name = nameOf(sh.pid)));
   const myLine = summary.user;

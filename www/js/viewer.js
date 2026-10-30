@@ -22,19 +22,33 @@ export function kitPair(colors) {
 export class PitchPlayer {
   constructor(canvas, R, hooks = {}) {
     this.cv = canvas; this.ctx = canvas.getContext("2d"); this.R = R; this.hooks = hooks;
-    this.frames = R.frames; this.endT = this.frames[this.frames.length - 1].t;
-    this.h2 = (this.frames.find(f => f.k === "half" && f.h === 2) || { t: 2800 }).t;
+    this.frames = R.frames;
+    // a live match keeps growing while the user answers key moments; a replay is complete from the start
+    this.live = !!R.live; this.complete = !this.live; this.waiting = false;
     this.kits = kitPair(R.colors);
-    const keyT = this.frames.filter(f => f.k === "shot" || f.k === "goal" || f.k === "pen" || f.k === "corner").map(f => f.t);
-    this.near = t => keyT.some(k => t >= k - 20 && t <= k + 5);
+    this.keyT = []; this.near = t => this.keyT.some(k => t >= k - 20 && t <= k + 5);
     this.slots = R.lineups.map(l => l.start.map(s => ({ ...s, x: 52.5, y: 34, vx: 0, vy: 0, fx: 0, fy: -1, ph: Math.random() * 6 })));
     this.spNow = 25; this.trail = [];
-    this.evs = R.events.slice().sort((a, b) => a.t - b.t);
+    this.evs = []; this.evSeen = 0; this.keySeen = 0;
+    this.sync();
     this.t = 0; this.speed = 25; this.hl = true; this.paused = false; this.done = false;
     this.fi = 0; this.evi = 0; this.lastSaid = -1; this.score = [0, 0];
     this.last = performance.now();
     this.resize = this.resize.bind(this); window.addEventListener("resize", this.resize); this.resize();
     this.loop = this.loop.bind(this); this.raf = requestAnimationFrame(this.loop);
+  }
+  // pick up frames and events the engine has added since the last call
+  sync() {
+    const F = this.frames;
+    this.endT = F.length ? F[F.length - 1].t : 0;
+    const h2 = F.find(f => f.k === "half" && f.h === 2); this.h2 = h2 ? h2.t : Infinity;
+    for (; this.keySeen < F.length; this.keySeen++) { const f = F[this.keySeen]; if (f.k === "shot" || f.k === "goal" || f.k === "pen" || f.k === "corner") this.keyT.push(f.t); }
+    const src = this.R.events;
+    if (src.length > this.evSeen) {
+      const add = src.slice(this.evSeen).map(e => this.hooks.mapEvent ? this.hooks.mapEvent(e) : e);
+      this.evSeen = src.length;
+      this.evs.push(...add); this.evs.sort((a, b) => a.t - b.t);
+    }
   }
   destroy() { cancelAnimationFrame(this.raf); window.removeEventListener("resize", this.resize); this.dead = true; }
   resize() {
@@ -205,13 +219,20 @@ export class PitchPlayer {
   loop(now) {
     if (this.dead) return;
     const realDt = Math.min(0.1, (now - this.last) / 1000); this.last = now;
-    const target = this.hl ? (this.near(this.t) ? 2.5 : 45) : this.speed;
+    const approaching = !this.complete && this.endT - this.t < 14; // slow down into the user's key moment
+    const target = this.hl ? (this.near(this.t) || approaching ? 2.5 : 45) : approaching ? Math.min(this.speed, 4) : this.speed;
     // ease between playback speeds so highlights don't jerk
     this.spNow += (target - this.spNow) * Math.min(1, realDt * (target < this.spNow ? 6 : 2));
     const sp = this.spNow;
-    if (!this.paused && !this.done) { this.t += realDt * sp; if (this.t >= this.endT) { this.t = this.endT; this.finish(); } }
+    if (!this.paused && !this.done && !this.waiting) {
+      this.t += realDt * sp;
+      if (this.t >= this.endT) {
+        this.t = this.endT;
+        if (this.complete) this.finish(); else { this.waiting = true; this.hooks.onWait?.(this); }
+      }
+    }
     const g = this.geom(), ball = this.ballAt(this.t);
-    this.update(this.t, ball, this.paused ? 0 : realDt * sp);
+    this.update(this.t, ball, this.paused ? 0 : this.waiting ? realDt * 1.5 : realDt * sp);
     this.narrate(ball.i);
     this.drawPitch(g); this.drawPlayers(g, ball);
     this.hooks.onTick?.(this);

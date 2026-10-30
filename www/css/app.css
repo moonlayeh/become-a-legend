@@ -393,3 +393,16 @@ main.page { padding: 10px 10px calc(var(--bot) + 24px); max-width: 980px; margin
 .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e5484d; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; margin-left: 5px; vertical-align: 2px; }
 .ibtn .dot { position: absolute; top: 4px; right: 4px; min-width: 16px; height: 16px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 3px; border: 2px solid var(--top, #222); }
 .ibtn { position: relative; }
+/* key moments during a live match */
+.moment { position: absolute; left: 0; right: 0; bottom: 0; z-index: 30; background: rgba(14,11,19,.97); border-top: 2px solid #ffd54a; padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); max-height: 62%; overflow: auto; box-shadow: 0 -10px 30px rgba(0,0,0,.6); animation: momup .22s ease-out; }
+@keyframes momup { from { transform: translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.moment .mbar { height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+.moment .mbar i { display: block; height: 100%; width: 100%; background: #ffd54a; transition: width .1s linear; }
+.mopts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mopt { display: flex; gap: 8px; align-items: flex-start; text-align: left; background: #221d2b; border: 1px solid #3a3346; color: #fff; border-radius: 10px; padding: 10px; min-height: 58px; font: inherit; cursor: pointer; }
+.mopt:active { background: #3b2f52; border-color: #ffd54a; }
+.mopt .mi { font-size: 20px; line-height: 1; }
+.mopt b { display: block; font-size: 14.5px; }
+.mopt small { display: block; font-size: 12px; opacity: .7; margin-top: 2px; line-height: 1.25; }
+.seg.wscroll { display: flex; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.seg.wscroll button { flex: none; white-space: nowrap; }

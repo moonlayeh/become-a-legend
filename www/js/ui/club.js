@@ -1,6 +1,6 @@
 // Skuad, Klub, Kompetisi pages
 import { register, go, save, S } from "./shell.js";
-import { $, $$, esc, crest, pill, avatar, lookFor, natTag, flagEmoji, heading, jersey, compBadge, shortDay, moneyShort } from "./core.js";
+import { $, $$, esc, crest, pill, avatar, lookFor, natTag, flagEmoji, heading, jersey, compBadge, shortDay, moneyShort, silhouette } from "./core.js";
 import { NATIONS, POS_LABEL } from "../data.js";
 import { fmt, ageOn, seasonLabel, ymd } from "../calendar.js";
 import { userP, userClub, table, leagueSeasonLabel } from "../world.js";
@@ -104,7 +104,7 @@ function clubComps(G, c) {
 register("klub", "staf", (G, root, p) => {
   const c = G.clubs[p.club] || userClub(G);
   root.innerHTML = `<div class="card"><div class="row" style="margin-bottom:8px">${crest(c, 32)}<div><b>${esc(c.name)}</b><div class="muted" style="font-size:13px">Semua Staf</div></div></div><div class="tscroll"><table class="tbl"><thead><tr><th></th><th>Nama</th><th>Jabatan</th><th class="n">Usia</th><th>Negara</th><th>Berakhir</th></tr></thead><tbody>
-    ${staffOf(G, c.id).map(s => `<tr><td></td><td>${esc(s.name)}</td><td>${esc(s.role)}</td><td class="n">${s.age}</td><td>${natTag(s.nat)}</td><td>30/6/${s.until + 1}</td></tr>`).join("")}</tbody></table></div></div>`;
+    ${staffOf(G, c.id).map((s, i) => `<tr class="click" data-go="staf/profil" data-p='{"club":"${c.id}","i":${i}}'><td>${silhouette(22)}</td><td>${esc(s.name)}</td><td>${esc(s.role)}</td><td class="n">${s.age}</td><td>${natTag(s.nat)}</td><td>30/6/${s.until + 1}</td></tr>`).join("")}</tbody></table></div></div>`;
 });
 register("klub", "sejarah", (G, root, p) => {
   const c = G.clubs[p.club] || userClub(G);

@@ -6,9 +6,10 @@ Game karier pemain sepak bola offline untuk Android. Semuanya dijalankan mesin a
 - **Kompetisi**: 19 piala domestik; Liga Champions, Liga Europa, Liga Konferensi (fase liga 36 tim, peserta resmi 2026/27); AFC Champions League Elite/Two; Libertadores; CAF Champions League; UEFA Youth League dan Libertadores Sub-20 untuk pemain akademi; UEFA Nations League A/B; Piala AFF 2026 dengan grup resmi.
 - **Pemain**: atribut 1–20 (Teknik, Mental, Fisik, Kiper), kemampuan dan potensi tersembunyi (CA/PA 1–200), kepribadian, posisi, kondisi, moral, dan cedera.
 - **Perkembangan**: dipengaruhi usia, potensi, profesionalisme, menit bermain, kualitas akademi, fokus dan intensitas latihan. Atribut fisik menurun setelah sekitar usia 29.
-- **Laga 2D**: setiap aksi (umpan, dribel, tekel, umpan silang, tembakan) dihitung dari atribut, lalu diputar di papan 2D. Ada mode sorotan dan kecepatan ×10, ×25, dan ×60.
+- **Laga 2D**: setiap aksi (umpan, dribel, tekel, umpan silang, tembakan) dihitung dari atribut, lalu diputar di papan 2D. Ada mode sorotan dan kecepatan ×10, ×25, dan ×60. Saat menonton, laga berhenti di momen kunci (bola di kakimu di area berbahaya, atau duel satu lawan satu saat bertahan) dan kamu memilih tembak, umpan pendek, umpan terobosan, umpan silang, giring bola, tekel berdiri, tekel sliding, atau jaga jarak. Pilihan dinilai (tepat/netral/berisiko), memengaruhi peluang berhasil, jalannya laga, dan rating. Frekuensi dan batas waktu memilih bisa diatur.
 - **Karier**: akademi U-19, promosi ke tim utama, kontrak, tawaran transfer, peminjaman, dan bicara dengan pelatih. Ada juga timnas U-17, U-19, U-21, dan senior (kualifikasi, Piala AFF/Asia/Eropa/Dunia), penghargaan musiman, Bola Emas, dan Hall of Fame.
 - **Aturan nyata**: larangan FIFA untuk transfer internasional di bawah 18 tahun (dengan pengecualian UE/EEE usia 16–17), jendela transfer, akumulasi kartu dan skorsing, serta kebijakan pemain Basque di Athletic Club.
+- **Menu bergaya FM**: Pribadi, Kontrak, Transfer, Pengembangan (efektivitas taktik), Performa (statistik, kondisi, jam terbang, rating laga, laporan pelatih), Karier (ringkasan dan linimasa), Perbandingan (radar, atribut, statistik, posisi, laporan), negosiasi kontrak, Kontak, profil staf, Database Pemain, dan halaman Tim Nasional.
 - **Mode Normal dan Keras**.
 
 Penyederhanaan: beberapa tanggal kompetisi bersifat perkiraan; liga tanpa divisi bawah yang disimulasikan tidak punya degradasi.
@@ -40,8 +41,8 @@ Lalu buka http://localhost:8000.
 - `www/js/world.js`, `sim.js`: dunia, jadwal, kalender, perkembangan
 - `www/js/career.js`, `intl.js`: karier, kontrak, transfer, timnas, penghargaan
 - `www/js/meta.js`: data turunan untuk tampilan (peran, reputasi, jadwal latihan, staf, kategori pesan)
-- `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, liga), `comps.js` (piala, antarklub, Nations League, bagan), `match.js` (persiapan, laga 2D, hasil), `create.js` (menu utama, pembuatan pemain)
-- `test/`: uji kalibrasi laga dan simulasi beberapa musim
+- `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, liga), `comps.js` (piala, antarklub, Nations League, bagan), `match.js` (persiapan, laga 2D dengan momen kunci, hasil), `create.js` (menu utama, pembuatan pemain), `people.js` (Pribadi, Kontrak, negosiasi, obrolan), `extra.js` (Kontak, staf, Database Pemain, timnas, Transfer, Pengembangan, Performa, Perbandingan)
+- `test/`: uji kalibrasi laga, momen kunci (`moment-test.mjs`), dan simulasi beberapa musim
 
 ## Sumber data
 

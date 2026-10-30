@@ -6,7 +6,8 @@ import { NATIONS } from "../data.js";
 import { fmtDay, ageOn } from "../calendar.js";
 import { userP } from "../world.js";
 import { fullName } from "../player.js";
-import { pendingTeams, teamColors, playPending, numOf } from "../sim.js";
+import { pendingTeams, teamColors, playPending, numOf, startLiveMatch, stepLive, endLiveMatch, matchCharts } from "../sim.js";
+import { MOMENT_LABEL } from "../match.js";
 import { PitchPlayer, kitPair } from "../viewer.js";
 import { formationPitch } from "./club.js";
 
@@ -53,15 +54,19 @@ function lineupPlates(G, T, col) {
 function play(G, watch) {
   const ld = document.createElement("div"); ld.className = "loading"; ld.innerHTML = '<div><div class="spin"></div>Pertandingan dimulai…</div>'; document.body.appendChild(ld);
   setTimeout(() => {
-    const r = playPending(G, true);
-    save(); ld.remove();
-    if (watch && r.replay) live(G, r.replay, r.summary);
-    else go("laga", "hasil", {}, true);
+    if (!watch) { playPending(G, true); save(); ld.remove(); go("laga", "hasil", {}, true); return; }
+    const ctx = startLiveMatch(G);
+    ld.remove();
+    live(G, ctx);
   }, 30);
 }
 
 // ---------- LIVE ----------
-function live(G, R, Sm) {
+// The engine runs ahead only up to the user's next key moment; the viewer plays what exists, then
+// waits for the user's choice before the engine continues.
+function live(G, ctx) {
+  const R = ctx.R;
+  let Sm = null;
   const kits = kitPair(R.colors);
   const el = document.createElement("div");
   el.className = "live";
@@ -72,11 +77,13 @@ function live(G, R, Sm) {
     <div class="liveticker" id="lt" aria-live="polite"><div class="now">Sepak mula!</div><div class="prev"></div></div>
     <div class="livetabs" role="tablist">${[["ev", "Peristiwa"], ["st", "Statistik"], ["fm", "Formasi"], ["mo", "Momentum"]].map(([k, l], i) => `<button data-lt="${k}" aria-selected="${i === 0}">${l}</button>`).join("")}</div>
     <div class="livepanel" id="lpanel"></div>
-    <div class="livectl"><button class="btn sm" data-a="hl" aria-pressed="true">Sorotan</button><button class="btn sm" data-s="10">×10</button><button class="btn sm" data-s="25" aria-pressed="true">×25</button><button class="btn sm" data-s="60">×60</button><button class="btn sm pri" data-a="end" style="margin-left:auto">Ke akhir</button></div>`;
+    <div class="livectl"><button class="btn sm" data-a="hl" aria-pressed="true">Sorotan</button><button class="btn sm" data-s="10">×10</button><button class="btn sm" data-s="25" aria-pressed="true">×25</button><button class="btn sm" data-s="60">×60</button><button class="btn sm pri" data-a="end" style="margin-left:auto">Ke akhir</button></div>
+    <div class="moment" id="moment" hidden></div>`;
   document.body.appendChild(el);
   history.pushState({ live: true }, "");
   let tab = "ev", lastPaint = 0;
-  const lines = {}; for (const l of R.lines) lines[l.id] = l;
+  const lines = {};
+  const nameOf = id => (id && R.info[id] ? R.info[id].full : "");
   // running commentary: every action can produce a line; ordinary lines are paced, key moments jump the queue
   let lastSay = 0, pending = null;
   const say = (html, prio = false) => {
@@ -87,7 +94,59 @@ function live(G, R, Sm) {
     cur.innerHTML = html; cur.classList.remove("in"); void cur.offsetWidth; cur.classList.add("in");
     lastSay = now; pending = null;
   };
+  // the result is applied once the engine reaches the final whistle
+  const settle = () => {
+    if (Sm) return;
+    const r = endLiveMatch(G, ctx);
+    save();
+    Sm = r.summary;
+    for (const l of Sm.lines) lines[l.id] = l;
+    pp.complete = true; pp.sync();
+  };
+  const choose = choice => {
+    const m = ctx.moment;
+    $("#moment", el).hidden = true; clearInterval(timer);
+    if (m) {
+      const ws = Object.values(m.weights), mx = Math.max(...ws), w = m.weights[choice ?? m.ai] ?? 0;
+      const v = choice == null ? 0 : w >= mx * 0.6 ? 1 : w < mx * 0.22 ? -1 : 0;
+      const lbl = MOMENT_LABEL[choice ?? m.ai][0];
+      say(choice == null ? `⏱ Waktu habis, kamu bertindak naluriah: <b>${esc(lbl)}</b>.` : v > 0 ? `✔ <b>${esc(lbl)}</b>. Keputusan tepat!` : v < 0 ? `✖ <b>${esc(lbl)}</b>. Keputusan berisiko…` : `<b>${esc(lbl)}</b>.`, true);
+    }
+    stepLive(G, ctx, choice);
+    pp.sync();
+    if (ctx.res) settle();
+    pp.waiting = false;
+  };
+  let timer = null;
+  const showMoment = () => {
+    const m = ctx.moment; if (!m) { if (ctx.res) settle(); pp.waiting = false; return; }
+    const box = $("#moment", el);
+    const lim = G.settings?.momentTimer ?? 8;
+    const vs = m.vs ? esc(R.info[m.vs]?.name || "Lawan") : "";
+    const head = m.kind === "atk"
+      ? `Bola di kakimu di ${esc(m.zone)}${m.dG ? `, ${m.dG} m dari gawang` : ""}${m.pressure < 2 ? ", lawan menempel ketat" : ""}.`
+      : `${vs} menggiring bola ke arahmu di ${esc(m.zone)}.`;
+    box.innerHTML = `<div class="spread"><b style="color:#ffd54a">${m.kind === "atk" ? "MOMEN KUNCI" : "DUEL BERTAHAN"} · ${esc(m.min)}'</b>${lim ? `<span class="muted" id="mcount">${lim} dtk</span>` : ""}</div>
+      ${lim ? `<div class="mbar"><i id="mbar"></i></div>` : ""}
+      <div style="font-size:14.5px;margin:6px 0 8px">${head}</div>
+      <div class="mopts">${m.options.map(o => `<button class="mopt" data-ch="${o.k}"><span class="mi">${MOMENT_LABEL[o.k][1]}</span><span><b>${esc(MOMENT_LABEL[o.k][0])}</b><small>${esc(o.hint.replace("{n}", R.info[o.pid]?.name || "rekan"))}</small></span></button>`).join("")}</div>`;
+    box.hidden = false;
+    box.querySelectorAll("[data-ch]").forEach(b => (b.onclick = () => choose(b.dataset.ch)));
+    if (lim) {
+      const t0 = performance.now();
+      timer = setInterval(() => {
+        if (pp.paused) return;
+        const left = lim - (performance.now() - t0) / 1000;
+        const c = $("#mcount", el), bar = $("#mbar", el);
+        if (c) c.textContent = `${Math.max(0, Math.ceil(left))} dtk`;
+        if (bar) bar.style.width = `${Math.max(0, left / lim) * 100}%`;
+        if (left <= 0) choose(null);
+      }, 100);
+    }
+    if (navigator.vibrate) try { navigator.vibrate(40); } catch {}
+  };
   const pp = new PitchPlayer(el.querySelector("canvas"), R, {
+    mapEvent: e => ({ ...e, name: nameOf(e.pid), astId: e.ast, ast: e.ast ? nameOf(e.ast) : null, offId: e.off, off: e.off ? nameOf(e.off) : null, no: e.pid ? R.info[e.pid]?.num : null }),
     onEvent: (e, P) => {
       const tn = R.names[e.side];
       const msg = e.type === "goal" ? `<b>GOL!</b> ${esc(e.name)} (${esc(tn)})${e.ast ? ` · assist ${esc(e.ast)}` : ""}` : e.type === "yc" ? `🟨 ${esc(e.name)} (${esc(tn)})` : e.type === "rc" ? `🟥 <b>Kartu merah</b> ${esc(e.name)}` : e.type === "sub" ? `🔁 ${esc(e.name)} masuk, ${esc(e.off)} keluar` : e.type === "inj" ? `✚ ${esc(e.name)} cedera` : e.type === "pen" ? `<b>Penalti</b> untuk ${esc(tn)}!` : e.type === "penmiss" ? "Penalti gagal!" : "";
@@ -98,25 +157,28 @@ function live(G, R, Sm) {
       const r = commentary(R, P.frames, j, P);
       if (r) say(r.t, r.prio);
     },
+    onWait: () => showMoment(),
     onTick: P => {
       $("#lc", el).textContent = P.clockLabel();
       if (pending && performance.now() - lastSay > 1100) say(pending);
       const now = performance.now(); if (now - lastPaint < 400) return; lastPaint = now;
       paintPanel(G, R, Sm, P, tab, $("#lpanel", el), lines);
     },
-    onEnd: () => { say(`<b>Peluit panjang.</b> ${esc(R.names[0])} ${Sm.score[0]}-${Sm.score[1]} ${esc(R.names[1])}`, true); const b = el.querySelector('[data-a="end"]'); b.textContent = "Lihat hasil"; $("#ls", el).textContent = `${Sm.score[0]} - ${Sm.score[1]}`; paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); },
+    onEnd: () => { settle(); say(`<b>Peluit panjang.</b> ${esc(R.names[0])} ${Sm.score[0]}-${Sm.score[1]} ${esc(R.names[1])}`, true); const b = el.querySelector('[data-a="end"]'); b.textContent = "Lihat hasil"; $("#ls", el).textContent = `${Sm.score[0]} - ${Sm.score[1]}`; paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); },
   });
+  if (ctx.res) settle();
   pp.speed = G.settings?.speed || 25;
   $$("[data-s]", el).forEach(x => x.setAttribute("aria-pressed", +x.dataset.s === pp.speed));
-  const close = () => { pp.destroy(); el.remove(); window.removeEventListener("popstate", onPop); go("laga", "hasil", {}, true); };
-  const onPop = () => { if (pp.done) close(); else { pp.finish(); history.pushState({ live: true }, ""); } };
+  const skip = () => { clearInterval(timer); $("#moment", el).hidden = true; settle(); pp.waiting = false; pp.finish(); };
+  const close = () => { clearInterval(timer); pp.destroy(); el.remove(); window.removeEventListener("popstate", onPop); go("laga", "hasil", {}, true); };
+  const onPop = () => { if (pp.done) close(); else { skip(); history.pushState({ live: true }, ""); } };
   window.addEventListener("popstate", onPop);
   el.addEventListener("click", e => {
-    const b = e.target.closest("button"); if (!b) return;
+    const b = e.target.closest("button"); if (!b || b.dataset.ch) return;
     if (b.id === "lp") { pp.paused = !pp.paused; b.textContent = pp.paused ? "▶" : "❚❚"; }
     if (b.dataset.s) { pp.speed = +b.dataset.s; pp.hl = false; $$("[data-s]", el).forEach(x => x.setAttribute("aria-pressed", x === b)); el.querySelector('[data-a="hl"]').setAttribute("aria-pressed", "false"); }
     if (b.dataset.a === "hl") { pp.hl = !pp.hl; b.setAttribute("aria-pressed", pp.hl); }
-    if (b.dataset.a === "end") { if (pp.done) { history.back(); } else pp.finish(); }
+    if (b.dataset.a === "end") { if (pp.done) { history.back(); } else if (ctx.moment && !Sm && !confirm("Lewati sisa laga? Momen kunci berikutnya akan dipilihkan otomatis.")) return; else skip(); }
     if (b.dataset.lt) { tab = b.dataset.lt; $$("[data-lt]", el).forEach(x => x.setAttribute("aria-selected", x === b)); paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); }
   });
   paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines);
@@ -166,14 +228,15 @@ function liveRating(l, t, endT, evs) {
   return Math.max(4, Math.min(10, 6.6 + (l.rating - 6.6 - gAll) * f + g * 0.95 + a * 0.6));
 }
 function paintPanel(G, R, Sm, P, tab, box, lines) {
-  const t = P.t, done = P.done;
-  const evs = R.events.filter(e => e.t <= t);
+  const t = P.t, done = P.done && !!Sm;
+  const evs = P.evs.filter(e => e.t <= t);
+  if (!Sm || !done) Sm = { ...(Sm || {}), ...matchCharts({ frames: R.frames, shots: R.shots }) };
   if (tab === "ev") {
     box.innerHTML = evs.filter(e => ["goal", "yc", "rc", "sub", "inj"].includes(e.type)).reverse().map(e => evRow(e)).join("") || '<div class="empty">Belum ada peristiwa.</div>';
   } else if (tab === "st") {
     box.innerHTML = statBars(liveStats(R, t, done ? Sm.teams : null), R.colors);
   } else if (tab === "fm") {
-    box.innerHTML = [0, 1].map(side => `<div class="ch" style="font-size:14px">${esc(R.names[side])}</div>${formationPitch(G, R.lineups[side].start.map(s => ({ ...s, pid: null, rating: done ? lines[s.id]?.rating : liveRating(lines[s.id], t, P.endT, R.events), me: R.info[s.id]?.user })), R.colors[side], { showPos: false })}`).join('<div style="height:10px"></div>');
+    box.innerHTML = [0, 1].map(side => `<div class="ch" style="font-size:14px">${esc(R.names[side])}</div>${formationPitch(G, R.lineups[side].start.map(s => ({ ...s, pid: null, rating: done ? lines[s.id]?.rating : liveRating(lines[s.id], t, P.endT, P.evs), me: R.info[s.id]?.user })), R.colors[side], { showPos: false })}`).join('<div style="height:10px"></div>');
   } else {
     box.innerHTML = momentumChart(Sm.momentum, R.colors, Sm.shots, P.minute(t)) + xgChart(Sm.shots, R.colors, P.minute(t));
   }
@@ -244,6 +307,7 @@ register("laga", "hasil", (G, root) => {
     ${Sm.aet || Sm.pens || Sm.agg ? `<div class="muted" style="margin-top:4px">${[Sm.aet ? "setelah perpanjangan waktu" : "", Sm.pensScore ? `adu penalti ${Sm.pensScore[0]}-${Sm.pensScore[1]}` : Sm.pens ? esc(Sm.pens) : "", Sm.agg ? `agregat ${Sm.agg[0]}-${Sm.agg[1]}` : ""].filter(Boolean).join(" · ")}</div>` : ""}
     <div class="mmeta"><span>${fmtDay(Sm.date)}</span>${Sm.venue ? `<span>◈ ${esc(Sm.venue)}</span>` : ""}<span>★ ${esc(Sm.pomName)} ${pomLine ? pill(pomLine.rating) : ""}</span></div></div>
   ${me ? `<div class="card" style="border-left:3px solid #ffd54a"><b>Kamu</b>: ${me.min} menit · rating ${pill1(me.rating)}${me.gls ? ` · ${me.gls} gol` : ""}${me.ast ? ` · ${me.ast} assist` : ""}${me.sh ? ` · ${me.sh} tembakan` : ""}${me.pas ? ` · umpan ${me.pasc}/${me.pas}` : ""}${me.drb ? ` · ${me.drb} dribel` : ""}${me.tck ? ` · ${me.tck} tekel` : ""}${me.injured ? ' · <b style="color:var(--bad)">cedera</b>' : ""}</div>` : '<div class="card">Kamu tidak dimainkan di laga ini.</div>'}
+  ${Sm.decisions?.length ? `<div class="card"><div class="ch">Keputusanmu</div><div class="spread" style="font-size:14px;margin-bottom:6px"><span style="color:var(--good)">✔ ${Sm.decisions.filter(d => d.verdict > 0).length} tepat</span><span>${Sm.decisions.filter(d => d.verdict === 0).length} netral</span><span style="color:var(--bad)">✖ ${Sm.decisions.filter(d => d.verdict < 0).length} berisiko</span></div><div class="row wrap" style="gap:4px">${Sm.decisions.map(d => `<span class="tag" style="border-color:${d.verdict > 0 ? "var(--good)" : d.verdict < 0 ? "var(--bad)" : "#777"}">${esc(d.min)}' ${MOMENT_LABEL[d.choice]?.[1] || ""} ${esc(MOMENT_LABEL[d.choice]?.[0] || d.choice)}</span>`).join("")}</div></div>` : ""}
   <button class="btn pri" id="cont" style="width:100%;min-height:48px;margin-bottom:10px;font-family:var(--display);font-size:20px">Lanjutkan</button>
   <div class="card"><div class="spread" style="margin-bottom:6px"><b class="disp" style="font-size:17px">${esc(Sm.homeShort || Sm.home.name)}</b><b class="disp" style="font-size:17px">${esc(Sm.awayShort || Sm.away.name)}</b></div>${statBars(T, [Sm.home.colors, Sm.away.colors])}</div>
   <div class="card"><div class="ch">Peristiwa Pertandingan</div><div class="spread" style="margin-bottom:6px"><b>${esc(Sm.homeShort)}</b><b class="disp" style="font-size:20px">${Sm.score[0]} - ${Sm.score[1]}</b><b>${esc(Sm.awayShort)}</b></div>${Sm.events.filter(e => ["goal", "rc", "sub", "inj", "yc"].includes(e.type)).map(evRow).join("") || '<div class="muted">Tidak ada.</div>'}</div>

@@ -3,6 +3,7 @@ import { S, go, render, onGo, save } from "./ui/shell.js";
 import "./ui/portal.js";
 import "./ui/player.js";
 import { openCoachTalk, openAgentTalk, openMateTalk } from "./ui/people.js";
+import "./ui/extra.js";
 import "./ui/club.js";
 import "./ui/match.js";
 import { mainMenu } from "./ui/create.js";
@@ -15,7 +16,7 @@ S.onAct = (act, el) => {
   if (act === "agent") openAgentTalk(S.G);
   if (act === "mate") openMateTalk(S.G, +el.dataset.mpid);
   if (act === "menu-utama") { save(); S.G = null; S.drawer = false; mainMenu(enter); }
-  if (act === "retire") { S.drawer = false; retireUser(S.G); save(); go("portal", "pesan", { mail: S.G.inbox[0].id }); }
+  if (act === "retire") { if (!confirm("Pensiun sekarang? Karier akan berakhir dan tidak bisa dibatalkan.")) return; S.drawer = false; retireUser(S.G); save(); go("portal", "pesan", { mail: S.G.inbox[0].id }); }
 };
 function enter(G) {
   S.G = G;

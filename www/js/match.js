@@ -52,12 +52,34 @@ function makeSide(team, idx, homeAdv) {
     t: { gls: 0, sh: 0, sot: 0, xg: 0, pas: 0, pasc: 0, pos: 0, cor: 0, fou: 0, yc: 0, rc: 0, off: 0, tck: 0 },
   };
 }
-const blankLine = () => ({ gls: 0, ast: 0, sh: 0, sot: 0, pas: 0, pasc: 0, kp: 0, drb: 0, drbf: 0, tck: 0, int: 0, hdr: 0, clr: 0, sav: 0, fou: 0, yc: 0, rc: 0, err: 0, off: 0, conc: 0 });
+const blankLine = () => ({ dg: 0, db: 0, gls: 0, ast: 0, sh: 0, sot: 0, pas: 0, pasc: 0, kp: 0, drb: 0, drbf: 0, tck: 0, int: 0, hdr: 0, clr: 0, sav: 0, fou: 0, yc: 0, rc: 0, err: 0, off: 0, conc: 0 });
 
+// Runs a whole match. With opts.interactive the generator below pauses at the user's key moments.
 export function simulateMatch(rng, home, away, opts = {}) {
+  const g = matchGen(rng, home, away, { ...opts, interactive: false });
+  let r = g.next();
+  while (!r.done) r = g.next(null);
+  return r.value;
+}
+
+export const MOMENT_LABEL = {
+  shoot: ["Tembak", "⚽"], pass: ["Umpan pendek", "➜"], through: ["Umpan terobosan", "⚡"], cross: ["Umpan silang", "↗"],
+  dribble: ["Giring bola", "💨"], long: ["Umpan panjang", "⤴"], clear: ["Buang bola", "⛔"],
+  tackle: ["Tekel berdiri", "🦵"], slide: ["Tekel sliding", "🛷"], jockey: ["Jaga jarak", "🛡"],
+};
+
+// Generator form of the engine. It yields a "moment" whenever the user's player faces a key decision
+// (on the ball in a dangerous area, or the last defender facing a dribbler); the value sent back with
+// next(choice) is the option key the user picked (null = let the engine decide).
+export function* matchGen(rng, home, away, opts = {}) {
   const rec = !!opts.record;
+  const interactive = !!opts.interactive && opts.userId != null;
+  const decisions = [];
+  let lastAtk = 0, lastDef = 0, nAtk = 0, nDef = 0, qBoost = 0, slideFoul = false;
+  // how often moments come up: [seconds between attacking moments, max attacking, seconds between defending, max defending]
+  const [GAP_A, MAX_A, GAP_D, MAX_D] = { sering: [110, 14, 170, 7], normal: [190, 10, 260, 5], jarang: [360, 6, 480, 3] }[opts.momentRate || "normal"] || [190, 10, 260, 5];
   const S = [makeSide(home, 0, 1.035), makeSide(away, 1, 1)];
-  const frames = [], events = [], shots = [];
+  const frames = opts.sink?.frames || [], events = opts.sink?.events || [], shots = opts.sink?.shots || []; // a live screen can watch these grow
   let half = 1, t = 0, clock = 0; // t: seconds in half, clock: absolute seconds for replay
   let poss = 0, carrier = null, bx = 52.5, by = 34; // ball in absolute coordinates
   let restart = { type: "kick", team: rng.chance(0.5) ? 0 : 1 };
@@ -125,7 +147,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
     S[defSide].t.fou++; fouler.s.fou++;
     const harsh = (fouler.p.a[A.agg] - fouler.p.a[A.tck] * 0.5 + 6) / 40;
     let card = null;
-    if (rng.chance(clamp(0.1 + harsh * 0.18, 0.04, 0.35) * (fouler.s.yc ? 0.2 : 1))) card = "Y";
+    if (rng.chance(clamp(0.1 + harsh * 0.18 + (slideFoul ? 0.22 : 0), 0.04, 0.6) * (fouler.s.yc ? (slideFoul ? 0.6 : 0.2) : 1))) card = "Y";
     if (rng.chance(0.0015 + harsh * 0.003)) card = "R";
     if (card === "Y" && fouler.s.yc) card = "R2";
     if (card) {
@@ -167,7 +189,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
       : sk(sh, [["fin",3],["cmp",1.4],["tec",1]]);
     const g = gk(1 - poss);
     const gq = sk(g, type === "pen" ? [["ref",2],["ovo",1],["agi",1]] : through ? [["ovo",3],["ref",2],["rus",1]] : [["ref",3],["han",1],["pos",1.2],["agi",1],["aer",type === "hdr" ? 1.5 : 0.3]]);
-    let pGoal = base * (0.36 + q * 0.8) * (1.32 - gq * 0.66);
+    let pGoal = base * (0.36 + (q + qBoost) * 0.8) * (1.32 - gq * 0.66);
     pGoal = clamp(pGoal, 0.003, type === "pen" ? 0.92 : 0.8);
     T.t.sh++; sh.s.sh++; T.t.xg += base * 0.8;
     const SR = { t: clock, side: poss, xg: +(base * 0.8).toFixed(3), pid: sh.p.id, kind: type, x: +F.x.toFixed(1), y: +F.y.toFixed(1), r: "off" }; shots.push(SR);
@@ -230,7 +252,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
     let p = 0.96 - d * 0.0055 - Math.max(0, prog) * 0.0028 - (kind === "long" ? 0.12 : 0) - (kind === "through" ? 0.16 : 0)
       - Math.max(0, 4 - rd) * 0.035 - Math.max(0, 2.5 - md) * 0.04 + (passQ - 0.5) * 0.32;
     if (nearRecv) p -= sk(nearRecv.o, [["ant",2],["pos",1.5],["mar",1]]) * 0.08 * (rd < 5 ? 1 : 0.3);
-    p = clamp(p, 0.25, 0.985);
+    p = clamp(p + qBoost, 0.2, 0.985);
     const travel = Math.max(1, d / (kind === "long" ? 22 : 15));
     if (rng.chance(p)) {
       // offside on through balls
@@ -269,7 +291,8 @@ export function simulateMatch(rng, home, away, opts = {}) {
     if (F.x < 30 && rng.chance(0.08)) from.s.err++;
   }
 
-  function act() {
+  // what the carrier sees: pressure, distances and the engine's own option weights
+  function situation() {
     const T = S[poss], O = S[1 - poss];
     const F = toF(poss, bx, by);
     const mine = positions(poss, true);
@@ -279,12 +302,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
     const pd = Math.max(0.6, pd0 - closing);
     const c = carrier;
     const isGK = c.pos === "GK";
-    if (!isGK && pd < 2.2 && rng.chance(0.006 + presser.o.p.a[A.agg] / 1400 + (20 - presser.o.p.a[A.tck]) / 2800)) {
-      rec_("foul"); foul(1 - poss, presser.o, poss, bx, by); return;
-    }
     const dG = dist(F.x, F.y, L, 34);
-
-    // options
     const opts = [];
     const xg = xG(F.x, F.y);
     if (!isGK && dG < 32 && F.x > 70) {
@@ -303,7 +321,30 @@ export function simulateMatch(rng, home, away, opts = {}) {
     if (F.x < 40 && (pd < 2.5 || isGK)) opts.push(["long", isGK ? 0.5 + c.p.a[A.kic] / 60 : 0.18]);
     if (!isGK && F.x < 22 && pd < 1.5 && DEF.has(c.pos)) opts.push(["clear", 0.6]);
     opts.push(["pass", isGK ? 1.1 : 1.6]);
-    const choice = rng.weighted(opts, o => o[1])[0];
+    return { T, O, F, mine, opp, presser, pd0, pd, c, isGK, dG, xg, opts };
+  }
+  function passTargets(sit, long) {
+    const { F, mine, opp, c } = sit;
+    const cands = mine.filter(q => q.o !== c && (q.o.pos !== "GK" || F.x < 30));
+    return cands.map(q => {
+      const d = dist(F.x, F.y, q.x, q.y);
+      const prog = q.x - F.x;
+      const [, rd] = nearest(opp, q.x, q.y);
+      let s = clamp((rd - 0.5) / 7, 0.05, 1) * Math.exp(prog * (long ? 0.06 : 0.032));
+      s *= long ? (d > 25 ? 1 : 0.1) : Math.exp(-Math.max(0, d - 12) / 14) * (d < 4 ? 0.2 : 1);
+      if (F.x > 66 && ATT.has(q.o.pos)) s *= q.o.pos === "ST" ? 0.95 : 1.4;
+      return { q, s, rd, prog };
+    });
+  }
+
+  function act(sit = situation(), forced = null, defCh = null, duelBy = null) {
+    const { T, O, F, presser, pd, c, isGK, opts } = sit;
+    if (!forced && !defCh && !isGK && pd < 2.2 && rng.chance(0.006 + presser.o.p.a[A.agg] / 1400 + (20 - presser.o.p.a[A.tck]) / 2800)) {
+      rec_("foul"); foul(1 - poss, presser.o, poss, bx, by); return;
+    }
+    let choice = forced || (defCh ? (defCh === "jockey" ? "pass" : "dribble") : rng.weighted(opts, o => o[1])[0]);
+    let wantThrough = false;
+    if (choice === "through") { choice = "pass"; wantThrough = true; }
 
     if (choice === "shoot") { shoot("open", through ? 1.45 : 1); through = false; return; }
     through = false;
@@ -322,7 +363,7 @@ export function simulateMatch(rng, home, away, opts = {}) {
       const tgtF = { x: rng.float(92, 100), y: 34 + rng.float(-7, 7) };
       const a = fromF(poss, tgtF.x, tgtF.y);
       carrier = null; bx = a.x; by = a.y; rec_("cross"); tick(2);
-      if (!rng.chance(0.22 + qx * 0.42)) { // poor cross
+      if (!rng.chance(0.22 + (qx + qBoost) * 0.42)) { // poor cross
         if (rng.chance(0.35)) { T.t.cor++; restart = { type: "corner", team: poss }; return; }
         const g = gk(1 - poss);
         if (rng.chance(0.4)) { giveTo(1 - poss, g, a.x, a.y); rec_("recv"); return; }
@@ -337,18 +378,18 @@ export function simulateMatch(rng, home, away, opts = {}) {
       const step = rng.float(5, 11);
       const dir = Math.abs(F.y - 34) > 12 && F.x > 65 ? Math.sign(34 - F.y) * 3 : rng.float(-3, 3);
       const nF = { x: clamp(F.x + step, 2, 103), y: clamp(F.y + dir, 2, 66) };
-      if (pd < 3.5) {
-        const d = presser.o;
+      if (pd < 3.5 || duelBy) {
+        const d = duelBy || presser.o;
         const att = sk(c, [["dri",3],["agi",1.5],["acc",1],["bal",1],["fla",0.7],["tec",1]]);
         const def = sk(d, [["tck",3],["pos",1.2],["ant",1],["str",1],["acc",0.8]]);
-        const pw = clamp(0.5 + (att - def) * 1.3, 0.18, 0.85);
+        const pw = clamp(0.5 + (att - def) * 1.3 + qBoost - (defCh === "slide" ? 0.17 : defCh === "tackle" ? 0.03 : 0), 0.12, 0.88);
         if (rng.chance(pw)) {
           c.s.drb++;
           const a = fromF(poss, nF.x, nF.y); bx = a.x; by = a.y; rec_("drib"); tick(3);
           return;
         }
         c.s.drbf++;
-        if (rng.chance(0.2 + d.p.a[A.agg] / 100)) { rec_("foul"); foul(1 - poss, d, poss, bx, by); return; }
+        if (rng.chance((defCh === "slide" ? 0.34 : 0.2) + d.p.a[A.agg] / 100)) { slideFoul = defCh === "slide"; rec_("foul"); foul(1 - poss, d, poss, bx, by); slideFoul = false; return; }
         d.s.tck++; O.t.tck++;
         injuryCheck(c, 1.2);
         giveTo(1 - poss, d, bx, by); rec_("tackle"); tick(2);
@@ -359,22 +400,18 @@ export function simulateMatch(rng, home, away, opts = {}) {
     }
 
     // passes
-    const cands = mine.filter(q => q.o !== c && (q.o.pos !== "GK" || F.x < 30));
     const long = choice === "long";
-    const scored = cands.map(q => {
-      const d = dist(F.x, F.y, q.x, q.y);
-      const prog = q.x - F.x;
-      const [, rd] = nearest(opp, q.x, q.y);
-      let s = clamp((rd - 0.5) / 7, 0.05, 1) * Math.exp(prog * (long ? 0.06 : 0.032));
-      s *= long ? (d > 25 ? 1 : 0.1) : Math.exp(-Math.max(0, d - 12) / 14) * (d < 4 ? 0.2 : 1);
-      if (F.x > 66 && ATT.has(q.o.pos)) s *= q.o.pos === "ST" ? 0.95 : 1.4;
-      return { q, s, rd, prog };
-    });
-    let pick = rng.weighted(scored, z => z.s * z.s);
+    const scored = passTargets(sit, long);
+    let pick = rng.weighted(scored, z => (forced ? z.s ** 3 : z.s * z.s));
+    if (wantThrough) {
+      const ahead = scored.filter(z => z.prog > 5 && z.q.o.pos !== "GK").sort((a, b) => (ATT.has(b.q.o.pos) ? 1.5 : 1) * b.s - (ATT.has(a.q.o.pos) ? 1.5 : 1) * a.s);
+      if (ahead.length) pick = ahead[0];
+    }
     if (!pick) { tick(2); return; }
     let kind = long ? "long" : "short";
     const tgt = { ...pick.q };
-    if (!long && ATT.has(tgt.o.pos) && pick.prog > 8 && F.x > 45 && rng.chance(0.18 + c.p.a[A.vis] / 80)) {
+    if (wantThrough && pick.prog > 5) { kind = "through"; tgt.x = clamp(tgt.x + rng.float(5, 10), 0, 101); }
+    else if (!long && forced !== "pass" && ATT.has(tgt.o.pos) && pick.prog > 8 && F.x > 45 && rng.chance(0.18 + c.p.a[A.vis] / 80)) {
       kind = "through"; tgt.x = clamp(tgt.x + rng.float(5, 10), 0, 101);
     }
     if (long) {
@@ -502,16 +539,81 @@ export function simulateMatch(rng, home, away, opts = {}) {
   }
   const benchFit = (b, pos) => (b.p.positions[pos] || 2) * 3 + b.p.ca / 10;
 
+  // ===== user key moments =====
+  const userOn = () => { for (const sd of S) for (const o of sd.on) if (o.on && o.p.id === opts.userId) return o; return null; };
+  const chanceWord = p => (p < 0.04 ? "sangat kecil" : p < 0.1 ? "kecil" : p < 0.2 ? "sedang" : p < 0.35 ? "besar" : "sangat besar");
+  function attackMoment() {
+    const sit = situation();
+    const { F, c, pd, dG, xg, opts: ai, isGK } = sit;
+    if (isGK) return null;
+    const key = F.x > 62 || (F.x > 38 && pd < 2.6) || (F.x > 50 && clock - lastAtk > GAP_A * 2.5);
+    if (!key || clock - lastAtk < GAP_A || nAtk >= MAX_A) return null;
+    const w = Object.fromEntries(ai);
+    const scored = passTargets(sit, false).sort((a, b) => b.s - a.s);
+    const ahead = scored.filter(z => z.prog > 5 && z.q.o.pos !== "GK").sort((a, b) => (ATT.has(b.q.o.pos) ? 1.5 : 1) * b.s - (ATT.has(a.q.o.pos) ? 1.5 : 1) * a.s);
+    const g = gk(1 - poss);
+    const q = dG > 22 ? sk(c, [["lon",3],["tec",1],["cmp",1]]) : sk(c, [["fin",3],["cmp",1.4],["tec",1]]);
+    const gq = sk(g, [["ref",3],["han",1],["pos",1.2],["agi",1]]);
+    const pShot = clamp(xg * (through ? 1.45 : 1) * (0.36 + q * 0.8) * (1.32 - gq * 0.66) * (pd < 1.5 ? 0.75 : 1), 0.003, 0.8);
+    const o = [];
+    if (F.x > 55) o.push({ k: "shoot", hint: `Jarak ${Math.round(dG)} m · peluang gol ${chanceWord(pShot)} (±${Math.max(1, Math.round(pShot * 100))}%)`, w: w.shoot || 0 });
+    if (scored[0]) o.push({ k: "pass", hint: `Rekan paling bebas: {n}`, pid: scored[0].q.o.p.id, w: w.pass * 0.75 });
+    if (ahead[0] && F.x > 35) o.push({ k: "through", hint: `Bola ke ruang di depan {n}`, pid: ahead[0].q.o.p.id, w: w.pass * (0.25 + c.p.a[A.vis] / 60) * (ahead[0].s > 0.25 ? 1.2 : 0.6) });
+    if (F.x > 65 && Math.abs(F.y - 34) > 14) o.push({ k: "cross", hint: `${S[poss].on.filter(x => x.on && ATT.has(x.pos)).length} rekan menunggu di kotak`, w: w.cross || 0.3 });
+    o.push({ k: "dribble", hint: pd < 2 ? `Dijaga ketat, lawan ${Math.max(1, Math.round(sit.pd0))} m` : pd < 4 ? `Lawan mendekat (${Math.round(sit.pd0)} m)` : "Ruang terbuka di depan", w: w.dribble || 0 });
+    if (F.x < 52) o.push({ k: "long", hint: "Bola jauh ke lini depan", w: w.long || 0.12 });
+    if (F.x < 25 && DEF.has(c.pos)) o.push({ k: "clear", hint: "Amankan bola dari area berbahaya", w: w.clear || 0.2 });
+    const best = o.slice().sort((a, b) => b.w - a.w)[0];
+    return { sit, m: { kind: "atk", t: clock, min: minLabel(), side: poss, pid: c.p.id, x: F.x, dG: Math.round(dG), pressure: pd, zone: F.x > 88 ? "kotak penalti" : F.x > 70 ? "sepertiga akhir" : F.x > 45 ? "lini tengah" : "area sendiri", options: o.map(({ w: _w, ...r }) => r), ai: best.k, weights: Object.fromEntries(o.map(x => [x.k, x.w])) } };
+  }
+  function defendMoment(me) {
+    if (carrier.pos === "GK" || me.pos === "GK" || clock - lastDef < GAP_D || nDef >= MAX_D) return null;
+    const sit = situation();
+    if (sit.presser.o !== me || sit.pd0 > 7 || sit.F.x < 45) return null;
+    const att = sk(carrier, [["dri",3],["agi",1.5],["acc",1],["bal",1],["fla",0.7],["tec",1]]);
+    const def = sk(me, [["tck",3],["pos",1.2],["ant",1],["str",1],["acc",0.8]]);
+    const pw = clamp(0.5 + (att - def) * 1.3, 0.12, 0.88); // attacker's chance to beat a standing tackle
+    const danger = sit.F.x > 80;
+    const o = [
+      { k: "tackle", hint: `Peluang merebut bola ${chanceWord(1 - pw)}`, w: 1 - pw },
+      { k: "slide", hint: me.s.yc ? "Berisiko: kamu sudah kena kartu kuning" : sit.F.x > 87 ? "Berisiko penalti!" : "Lebih mungkin merebut bola, rawan pelanggaran", w: (1 - pw + 0.17) * (me.s.yc ? 0.3 : sit.F.x > 87 ? 0.4 : 0.72) },
+      { k: "jockey", hint: danger ? "Tutup ruang, paksa lawan mengoper" : "Tunda serangan sambil menunggu bantuan", w: pw > 0.55 ? 0.8 : 0.45 },
+    ];
+    const best = o.slice().sort((a, b) => b.w - a.w)[0];
+    return { sit, m: { kind: "def", t: clock, min: minLabel(), side: 1 - poss, pid: me.p.id, vs: carrier.p.id, x: 105 - sit.F.x, zone: sit.F.x > 88 ? "kotak penalti sendiri" : sit.F.x > 70 ? "sepertiga akhir sendiri" : "lini tengah", options: o.map(({ w: _w, ...r }) => r), ai: best.k, weights: Object.fromEntries(o.map(x => [x.k, x.w])) } };
+  }
+  function judge(m, ch) {
+    const ws = Object.values(m.weights), mx = Math.max(...ws), w = m.weights[ch] ?? 0;
+    return w >= mx * 0.6 ? 1 : w < mx * 0.22 ? -1 : 0;
+  }
+
   // ===== main loop =====
   for (half = 1; half <= 2; half++) {
     t = 0;
     halfLen = 2700 + (half === 1 ? rng.int(60, 200) : rng.int(150, 360));
     restart = { type: "kick", team: half === 1 ? firstKick : 1 - firstKick };
     if (rec) frames.push({ t: clock, x: 52.5, y: 34, s: restart.team, c: null, k: "half", h: half });
-    let guard = 0;
+    let guard = 0, mo = null, uo = null;
     while (t < halfLen && guard++ < 6000) {
       if (restart) doRestart();
       else if (!carrier || !carrier.on) { const a = contest(bx, by); }
+      else if (interactive && carrier.p.id === opts.userId && (mo = attackMoment())) {
+        const ch = (yield mo.m) || mo.m.ai, v = judge(mo.m, ch), me = carrier;
+        lastAtk = clock; nAtk++;
+        decisions.push({ kind: "atk", min: mo.m.min, t: mo.m.t, choice: ch, verdict: v });
+        if (v > 0) me.s.dg++; else if (v < 0) me.s.db++;
+        qBoost = v > 0 ? 0.06 : v < 0 ? -0.04 : 0;
+        act(mo.sit, ch);
+        qBoost = 0;
+      } else if (interactive && carrier.side !== (uo = userOn())?.side && uo && (mo = defendMoment(uo))) {
+        const ch = (yield mo.m) || mo.m.ai, v = judge(mo.m, ch);
+        lastDef = clock; nDef++;
+        decisions.push({ kind: "def", min: mo.m.min, t: mo.m.t, choice: ch, verdict: v });
+        if (v > 0) uo.s.dg++; else if (v < 0) uo.s.db++;
+        qBoost = ch === "jockey" ? -0.06 : 0;
+        act(mo.sit, null, ch, ch === "jockey" ? null : uo);
+        qBoost = 0;
+      }
       else act();
       if (carrier && carrier.on) {
         // injury chance per action for carrier
@@ -525,14 +627,14 @@ export function simulateMatch(rng, home, away, opts = {}) {
   }
 
   // ===== ratings =====
-  const res = { score: [S[0].t.gls, S[1].t.gls], teams: S.map(s => ({ ...s.t, pos: 0 })), players: {}, events, frames, shots, lineups: null };
+  const res = { score: [S[0].t.gls, S[1].t.gls], teams: S.map(s => ({ ...s.t, pos: 0 })), players: {}, events, frames, shots, lineups: null, decisions };
   const posTot = S[0].t.pos + S[1].t.pos;
   res.teams[0].pos = Math.round(S[0].t.pos / posTot * 100); res.teams[1].pos = 100 - res.teams[0].pos;
   for (const sd of S) {
     const won = res.score[sd.idx] > res.score[1 - sd.idx], lost = res.score[sd.idx] < res.score[1 - sd.idx];
     for (const o of sd.on) {
       const s = o.s, mins = Math.round(o.m);
-      let r = 6.3 + s.gls * 0.95 + s.ast * 0.6 + s.kp * 0.14 + s.sot * 0.08 - (s.sh - s.sot) * 0.03
+      let r = 6.3 + s.dg * 0.03 - s.db * 0.06 + s.gls * 0.95 + s.ast * 0.6 + s.kp * 0.14 + s.sot * 0.08 - (s.sh - s.sot) * 0.03
         + s.pasc * 0.005 - (s.pas - s.pasc) * 0.035 + s.drb * 0.06 - s.drbf * 0.04 + s.tck * 0.08 + s.int * 0.07 + s.hdr * 0.03 + s.clr * 0.03
         - s.fou * 0.05 - s.yc * 0.2 - s.rc * 1.5 - s.err * 0.5 - s.off * 0.04;
       if (o.pos === "GK") r += s.sav * 0.22 - s.conc * 0.32;
