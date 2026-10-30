@@ -6,6 +6,8 @@ import { A, ATTRS } from "./attributes.js";
 import { genPlayer, slotRating, marketValue, fairWage, fullName, newStats } from "./player.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day } from "./calendar.js";
 import { addMail, addNews, userP, userClub, table, fifaU18Allowed, birthForAge, newCompStats, clubNatOK, needsLanguage } from "./world.js";
+import { sessionsFor, userMatchDays, SESS } from "./meta.js";
+import { openNegotiation, cancelNegotiation, permitOK } from "./contract.js";
 
 const avg = a => a.reduce((s, x) => s + x, 0) / (a.length || 1);
 // nationality that counts for a club in country `cn` (dual nationals use the matching one)
@@ -108,11 +110,7 @@ export function monthlyCareer(G, rng) {
   if (p.contract.youth && age >= 17 && !G.user.offeredPro) {
     G.user.offeredPro = true;
     const wage = Math.max(300, Math.round(fairWage(p, club.league) * 0.7 / 50) * 50);
-    decision(G, "Kontrak profesional pertama", `${club.name} menawarkan kontrak profesional pertamamu: ${3} tahun, €${wage.toLocaleString("id-ID")}/pekan.`, [
-      { label: "Tanda tangani", detail: "Kontrak sampai akhir musim " + seasonLabel(season + 3) + ".", act: "signContract", data: { years: 3, wage } },
-      { label: "Minta gaji lebih tinggi", detail: "Bisa naik, tapi klub bisa tersinggung.", act: "negotiate", data: { years: 3, wage } },
-      { label: "Tolak dan cari klub lain", detail: "Kamu akan dilepas akhir musim.", act: "refuseContract" },
-    ]);
+    openNegotiation(G, rng, { club: club.id, kind: "pro", wage, years: 3, intro: `${club.name} menawarkan kontrak profesional pertamamu.` });
   }
   // renewal in final season
   if (!p.contract.youth && p.contract.end === season && m >= 10 && !G.user.renewOffered && !G.user.leaving && !G.user.loan) {
@@ -121,11 +119,7 @@ export function monthlyCareer(G, rng) {
       G.user.renewOffered = true;
       const wage = Math.round(fairWage(p, club.league) * rng.float(0.9, 1.15) / 50) * 50;
       const years = age < 24 ? 4 : age < 30 ? 3 : age < 33 ? 2 : 1;
-      decision(G, "Tawaran perpanjangan kontrak", `${club.name} ingin memperpanjang kontrakmu ${years} tahun dengan gaji €${wage.toLocaleString("id-ID")}/pekan (sekarang €${p.contract.wage.toLocaleString("id-ID")}).`, [
-        { label: "Perpanjang", detail: `Bertahan sampai ${seasonLabel(season + years)}.`, act: "signContract", data: { years, wage } },
-        { label: "Minta gaji lebih tinggi", detail: "Klub bisa menolak.", act: "negotiate", data: { years, wage } },
-        { label: "Tolak", detail: "Kamu bebas pergi saat kontrak habis.", act: "refuseContract" },
-      ]);
+      openNegotiation(G, rng, { club: club.id, kind: "renew", wage, years, intro: `${club.name} ingin memperpanjang kontrakmu (gaji sekarang ${W(p.contract.wage)}/pekan).` });
     }
   }
 }
@@ -133,6 +127,7 @@ export function monthlyCareer(G, rng) {
 export function weeklyCareer(G, rng) {
   const p = userP(G);
   if (G.user.retired) return;
+  if (G.neg && ["open", "final"].includes(G.neg.status) && G.date - (G.neg.opened ?? G.date) > 21) cancelNegotiation(G, rng, "Klub menarik tawarannya karena tidak ada jawaban selama tiga pekan.");
   if (!inWindow(G.date)) return;
   const age = ageOn(p.birth, G.date);
   const club = userClub(G);
@@ -141,7 +136,7 @@ export function weeklyCareer(G, rng) {
   // loans
   if (!G.user.loan && age <= 21 && (p.squad === "A" ? share < 0.25 : p.ca > firstTeamThreshold(G, club) - (age >= 18 ? 38 : 26) && age >= 17) && rng.chance(G.user.wantLoan ? 0.45 : 0.2)) {
     const nat = G.clubs[p.club].nation;
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level <= p.ca + 8 && c.level >= p.ca - 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level <= p.ca + 8 && c.level >= p.ca - 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)) && permitOK(G, c).ok);
     if (cands.length) {
       const c = rng.pick(cands);
       decision(G, "Tawaran peminjaman", `${c.name} (${G.leagues[c.league].name}) ingin meminjammu sampai akhir musim. ${club.name} setuju karena ingin kamu mendapat menit bermain.`, [
@@ -154,26 +149,29 @@ export function weeklyCareer(G, rng) {
   // transfer interest
   const value = marketValue(p, G.date, club.league);
   const appeal = ((p.form.length ? avg(p.form.slice(-8)) : 6.6) - 6.6) * 0.15 + (p.ca - club.level) / 60 + (G.user.listed ? 0.25 : 0) + (age <= 23 ? 0.05 : 0);
-  if (p.squad === "A" && !G.user.loan && rng.chance(clamp(0.05 + appeal, 0.02, 0.35))) {
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
+  if (G.user.blockOffers || (G.neg && ["open", "final"].includes(G.neg.status))) return;
+  if (p.squad === "A" && !G.user.loan && rng.chance(clamp(0.05 + appeal + (G.user.agentPush ? 0.12 : 0), 0.02, 0.45))) {
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)) && permitOK(G, c).ok);
     if (!cands.length) return;
     const c = rng.weighted(cands, c => c.level);
-    const fee = Math.round(value * rng.float(0.85, 1.4) * 10) / 10;
-    const accept = G.user.listed || fee >= value * 1.1 || ["Pemain Cadangan", "Prospek Muda"].includes(squadStatus(G));
+    let fee = Math.round(value * rng.float(0.85, 1.4) * 10) / 10;
+    const rel = p.contract?.release;
+    if (rel && c.level >= p.ca && rng.chance(0.35)) fee = Math.max(fee, rel);
+    const accept = G.user.listed || (rel && fee >= rel) || fee >= value * 1.1 || ["Pemain Cadangan", "Prospek Muda"].includes(squadStatus(G));
     const wage = Math.round(fairWage(p, c.league) * rng.float(1, 1.25) / 50) * 50;
     const years = age < 26 ? 5 : age < 30 ? 3 : 2;
     if (accept) {
-      decision(G, `Tawaran transfer: ${c.name}`, `${c.name} (${G.leagues[c.league].name}) sepakat dengan ${club.name} soal biaya transfer €${fmtM(fee)}. Mereka menawarkan kontrak ${years} tahun, €${wage.toLocaleString("id-ID")}/pekan.`, [
-        { label: `Gabung ${c.short}`, detail: `Pindah ke ${c.name} hari ini.`, act: "transfer", data: { to: c.id, fee, wage, years } },
-        { label: "Minta gaji lebih tinggi", detail: "Bisa naik 10–20%, bisa juga batal.", act: "transferNeg", data: { to: c.id, fee, wage, years } },
-        { label: "Tolak", detail: `Bertahan di ${club.short}.`, act: "stay" },
-      ], "transfer");
+      openNegotiation(G, rng, { club: c.id, kind: "transfer", fee, wage, years, intro: `${c.name} (${G.leagues[c.league].name}) sepakat dengan ${club.name} soal biaya transfer ${F(fee)}${rel && fee >= rel ? " (klausul pelepasanmu terpenuhi)" : ""}.` });
+      G.user.agentPush = false;
     } else {
-      addMail(G, "Tawaran ditolak klub", `${club.name} menolak tawaran €${fmtM(fee)} dari ${c.name} untukmu. Kamu dianggap terlalu penting untuk dilepas.`, "info");
-      addNews(G, { title: `${club.short} tolak tawaran ${c.short} untuk ${fullName(p)}`, body: `${club.name} menolak tawaran €${fmtM(fee)} dari ${c.name}. Klub menganggap ${fullName(p)} terlalu penting untuk dilepas.`, tag: "Rumor Transfer", club: c.id, scope: "me" });
+      addMail(G, "Tawaran ditolak klub", `${club.name} menolak tawaran ${F(fee)} dari ${c.name} untukmu. Kamu dianggap terlalu penting untuk dilepas.`, "info");
+      addNews(G, { title: `${club.short} tolak tawaran ${c.short} untuk ${fullName(p)}`, body: `${club.name} menolak tawaran ${F(fee)} dari ${c.name}. Klub menganggap ${fullName(p)} terlalu penting untuk dilepas.`, tag: "Rumor Transfer", club: c.id, scope: "me" });
     }
   }
 }
+// money tokens: converted to the chosen currency when shown (see ui/core.js esc)
+export const W = v => `⟦w:${Math.round(v)}⟧`;
+export const F = m => `⟦m:${m}⟧`;
 export const fmtM = v => v >= 1 ? `${v.toFixed(1)} jt` : `${Math.round(v * 1000)} rb`;
 
 export function playShare(G) {
@@ -215,7 +213,7 @@ export function resolveDecision(G, mailId, idx, rng) {
       if (rng.chance(G.user.difficulty === "Keras" ? 0.45 : 0.65)) {
         const wage = Math.round(d.wage * rng.float(1.08, 1.22) / 50) * 50;
         p.contract = { end: season + d.years, wage };
-        msg = `Klub setuju menaikkan gaji jadi €${wage.toLocaleString("id-ID")}/pekan.`;
+        msg = `Klub setuju menaikkan gaji jadi ${W(wage)}/pekan.`;
       } else { msg = "Klub tidak mau menaikkan tawaran dan menarik tawarannya. Kontrakmu akan habis."; G.user.leaving = true; p.morale = Math.max(10, p.morale - 10); }
       break;
     case "refuseContract":
@@ -231,7 +229,7 @@ export function resolveDecision(G, mailId, idx, rng) {
       msg = `Resmi! Kamu pindah ke ${G.clubs[d.to].name}.`;
       break;
     case "transferNeg":
-      if (rng.chance(0.6)) { const wage = Math.round(d.wage * rng.float(1.1, 1.2) / 50) * 50; doTransfer(G, d.to, d.fee, wage, d.years); msg = `Mereka setuju gaji €${wage.toLocaleString("id-ID")}/pekan. Kamu pindah ke ${G.clubs[d.to].name}.`; }
+      if (rng.chance(0.6)) { const wage = Math.round(d.wage * rng.float(1.1, 1.2) / 50) * 50; doTransfer(G, d.to, d.fee, wage, d.years); msg = `Mereka setuju gaji ${W(wage)}/pekan. Kamu pindah ke ${G.clubs[d.to].name}.`; }
       else msg = `${G.clubs[d.to].name} mundur dari negosiasi.`;
       break;
     case "freeAgent":
@@ -243,6 +241,21 @@ export function resolveDecision(G, mailId, idx, rng) {
       msg = `Kamu kini membela ${NATIONS[d.to].name}.`;
       addNews(G, { title: `${fullName(p)} pilih ${NATIONS[d.to].name}`, body: `${fullName(p)} resmi memilih membela timnas ${NATIONS[d.to].name} setelah FIFA menyetujui perpindahan federasi.`, tag: "Timnas", scope: "me" });
       break;
+    case "openNeg":
+      msg = "Negosiasi dibuka.";
+      break;
+    case "rejectNeg":
+      cancelNegotiation(G, rng, "Kamu menolak tawaran itu.");
+      msg = "Tawaran ditolak.";
+      break;
+    case "listMe":
+      G.user.listed = true; msg = "Namamu masuk daftar transfer."; break;
+    case "naturalise":
+      p.nat2 = d.nat; msg = `Kamu kini juga warga negara ${NATIONS[d.nat].name}.`;
+      addNews(G, { title: `${fullName(p)} resmi jadi warga negara ${NATIONS[d.nat].name}`, body: `Setelah lima tahun tinggal di ${NATIONS[d.nat].name}, ${fullName(p)} resmi mendapat kewarganegaraan negara itu.`, tag: "Pribadi", scope: "me" });
+      break;
+    case "relegRelease":
+      p.contract.end = seasonOf(G.date) - (ymd(G.date).m >= 7 ? 1 : 0); G.user.leaving = true; userContractExpiry(G, rng); msg = "Klausul degradasi diaktifkan; kamu bebas mencari klub."; break;
     case "retire":
       G.user.retired = true; G.user.retiredOn = G.date;
       msg = "Kamu mengumumkan pensiun. Terima kasih untuk semua kenangannya.";
@@ -264,7 +277,7 @@ export function doTransfer(G, to, fee, wage, years) {
   p.favour = 0;
   G.user.moves = G.user.moves || [];
   G.user.moves.push({ date: G.date, from: from.id, to, fee, type: "transfer" });
-  addNews(G, { title: `${dest.short} resmi rekrut ${fullName(p)}`, body: `${dest.name} merekrut ${fullName(p)} dari ${from.name}${fee ? ` dengan biaya €${fmtM(fee)}` : " secara gratis"}. Kontraknya berlaku ${years} tahun.`, tag: "Transfer", club: to, scope: "me", fee });
+  addNews(G, { title: `${dest.short} resmi rekrut ${fullName(p)}`, body: `${dest.name} merekrut ${fullName(p)} dari ${from.name}${fee ? ` dengan biaya ${F(fee)}` : " secara gratis"}. Kontraknya berlaku ${years} tahun.`, tag: "Transfer", club: to, scope: "me", fee });
 }
 export function doLoan(G, to) {
   const p = userP(G), from = G.clubs[p.club], dest = G.clubs[to];
@@ -330,12 +343,8 @@ export function talk(G, topic, rng) {
       if (p.contract.youth) return "Pelatih: \"Kontrak profesional baru bisa diberikan setelah usiamu 17 tahun.\"";
       if (["Pemain Kunci", "Pemain Inti"].includes(st) && p.contract.wage < fairWage(p, club.league) * 0.85) {
         G.user.renewOffered = false;
-        const wage = Math.round(fairWage(p, club.league) / 50) * 50;
-        decision(G, "Kontrak baru", `${club.name} setuju memperbarui kontrakmu: 4 tahun, €${wage.toLocaleString("id-ID")}/pekan.`, [
-          { label: "Tanda tangani", detail: "Gaji naik, kontrak lebih panjang.", act: "signContract", data: { years: 4, wage } },
-          { label: "Tolak", detail: "Kontrak lama tetap berlaku.", act: "none" },
-        ]);
-        return "Direktur olahraga: \"Kami sudah kirim tawaran ke agenmu.\"";
+        openNegotiation(G, rng, { club: club.id, kind: "renew", wage: Math.round(fairWage(p, club.league) / 50) * 50, years: 4 });
+        return "Direktur olahraga: \"Baik, kita duduk bersama. Cek pesan untuk membuka negosiasi.\"";
       }
       return "Direktur olahraga: \"Kontrakmu saat ini sudah sesuai dengan peranmu di tim.\"";
     }
@@ -470,6 +479,69 @@ export function userContractExpiry(G, rng) {
   decision(G, "Kamu pemain bebas", `Kontrakmu dengan ${userClub(G).name} habis. Beberapa klub menawarimu kontrak:`, picks.map(c => {
     const wage = Math.round(fairWage(p, c.league) * rng.float(0.95, 1.2) / 50) * 50;
     const years = age < 28 ? 3 : 2;
-    return { label: `${c.name}`, detail: `${G.leagues[c.league].name} · ${years} tahun · €${wage.toLocaleString("id-ID")}/pekan`, act: "freeAgent", data: { to: c.id, wage, years } };
+    return { label: `${c.name}`, detail: `${G.leagues[c.league].name} · ${years} tahun · ${W(wage)}/pekan`, act: "freeAgent", data: { to: c.id, wage, years } };
   }), "transfer");
+}
+
+// ---------- daily training sessions ----------
+// effort per day: rating shift, fatigue per physical session, injury risk, development weight
+export const EFFORT = {
+  Santai: { r: -0.3, c: 2, inj: 0.35, dev: 0.75, label: "Santai", desc: "Hemat tenaga, risiko cedera kecil, perkembangan lebih lambat." },
+  Normal: { r: 0, c: 4, inj: 1, dev: 1, label: "Normal", desc: "Ikuti program pelatih seperti biasa." },
+  Maksimal: { r: 0.35, c: 7, inj: 2.2, dev: 1.3, label: "Maksimal", desc: "Kesan bagus di mata pelatih dan perkembangan lebih cepat, tapi lebih lelah dan rawan cedera." },
+};
+const SESS_ATTR = { fis: ["sta", "nat", "acc", "str"], tak: ["dec", "pos", "tea", "ant"], bola: ["fir", "pas", "tec", "dri"], ind: ["det", "wor", "cmp"], rest: [] };
+export function trainingSessionsToday(G) {
+  const u = userP(G);
+  if (G.user.retired || !u.club || u.injury || u.away) return null;
+  const s = sessionsFor(G, u.club, G.date, userMatchDays(G));
+  if (!s.s || s.match || s.off || !s.s.some(k => k !== "ist")) return null;
+  return s.s;
+}
+export function doTraining(G, rng, effort = "Normal", extra = false, auto = false) {
+  const u = userP(G), E = EFFORT[effort] || EFFORT.Normal;
+  const list = trainingSessionsToday(G);
+  if (!list) return null;
+  const condBefore = u.cond;
+  const sessions = list.map(k => {
+    const [name, cat] = SESS[k];
+    if (k === "ist") return { k, name, cat, rating: null };
+    const rel = SESS_ATTR[cat] || [];
+    const attr = rel.length ? rel.reduce((s, a) => s + u.a[A[a]], 0) / rel.length : 10;
+    let r = 6.25 + (u.hid.pro - 10) * 0.05 + (u.a[A.det] - 10) * 0.04 + (u.a[A.wor] - 10) * 0.03 + (attr - 11) * 0.05 + E.r + rng.normal(0, 0.35);
+    if (u.cond < 70) r -= 0.3;
+    if (G.user.adapt) r -= 0.1;
+    return { k, name, cat, rating: Math.round(clamp(r, 4.5, 9.8) * 100) / 100 };
+  });
+  const rated = sessions.filter(x => x.rating != null);
+  const avg = rated.length ? rated.reduce((s, x) => s + x.rating, 0) / rated.length : 6.5;
+  const fis = sessions.filter(x => x.cat === "fis").length, oth = rated.length - fis;
+  u.cond = clamp(u.cond - (E.c * fis + Math.ceil(E.c / 2) * oth + (extra ? 4 : 0)), 35, 100);
+  u.sharp = clamp((u.sharp ?? 60) + oth * 1.5, 0, 100);
+  G.user.trainBoost = (G.user.trainBoost || 0) + (avg - 6.6) * 0.03 * E.dev + (E.dev - 1) * 0.04 + (extra ? 0.03 : 0);
+  G.user.trainedWeek = (G.user.trainedWeek || 0) + 1;
+  // training injury
+  let injury = null;
+  if (rng.chance(0.0012 * rated.length * E.inj * (0.6 + u.hid.inj / 20) * (u.cond < 70 ? 1.8 : 1) * (extra ? 1.5 : 1) * (G.user.difficulty === "Keras" ? 1.3 : 1))) {
+    const days = rng.int(3, 21);
+    u.injury = { name: rng.pick(["Cedera ringan saat latihan", "Otot paha tertarik", "Pergelangan kaki terkilir"]), days, total: days, since: G.date };
+    G.user.injuries.push({ date: G.date, name: u.injury.name, days });
+    injury = u.injury;
+  }
+  // teammates on the same pitch
+  const club = G.clubs[u.club];
+  const mates = (u.squad === "Y" ? club.youthSquad : club.squad).map(id => G.players[id]).filter(p => p && !p.isUser && !p.injury);
+  const sample = rng.shuffle(mates).slice(0, 10).map(p => ({ id: p.id, name: `${p.fn[0]}. ${p.ln}`, rating: Math.round(clamp(6.3 + (p.hid.pro - 10) * 0.05 + rng.normal(0, 0.4), 5, 9.5) * 100) / 100 }));
+  const board = [...sample, { id: u.id, name: `${u.fn[0]}. ${u.ln}`, rating: Math.round(avg * 100) / 100, me: true }].sort((a, b) => b.rating - a.rating);
+  const rank = board.findIndex(x => x.me) + 1;
+  const coach = avg >= 7.6 ? "Luar biasa hari ini. Kalau begini terus, kamu akan dapat kesempatan." : avg >= 7 ? "Latihan yang bagus. Pertahankan intensitas seperti ini." : avg >= 6.5 ? "Cukup baik, tapi aku tahu kamu bisa lebih." : avg >= 6 ? "Kurang fokus hari ini. Besok harus lebih baik." : "Itu latihan yang buruk. Kita perlu bicara kalau ini berlanjut.";
+  if (avg >= 7.4) u.morale = clamp((u.morale ?? 65) + 1, 0, 100);
+  if (avg < 6) u.morale = clamp((u.morale ?? 65) - 1, 0, 100);
+  const out = { date: G.date, effort, extra, sessions, avg: Math.round(avg * 100) / 100, condBefore: Math.round(condBefore), condAfter: Math.round(u.cond), board, rank, coach, injury: injury ? { name: injury.name, days: injury.days } : null, auto };
+  G.user.lastTraining = out;
+  (G.user.trainRatings = G.user.trainRatings || []).push(out.avg); if (G.user.trainRatings.length > 12) G.user.trainRatings.shift();
+  G.user.trainDone = G.date;
+  G.trainingDue = false;
+  if (injury && !auto) addMail(G, "Cedera di latihan", `Kamu mengalami ${injury.name.toLowerCase()} dan absen sekitar ${injury.days} hari.`, "bad", { cat: "Cedera" });
+  return out;
 }

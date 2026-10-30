@@ -19,7 +19,7 @@ const heart = c => `<span style="color:${c >= 90 ? "var(--good)" : c >= 75 ? "va
 
 export function bestXI(G, clubId) {
   const club = G.clubs[clubId];
-  const pool = club.squad.map(id => G.players[id]).filter(p => p && !p.injury && !(p.ban > 0));
+  const pool = club.squad.map(id => G.players[id]).filter(p => p && !p.injury && !(p.bans?.liga > 0));
   const form = FORMATIONS[club.formation] || FORMATIONS["4-3-3"];
   const used = new Set(), xi = [];
   const order = form.map((_, i) => i).sort((a, b) => (form[a][0] === "GK" ? -1 : 0) - (form[b][0] === "GK" ? -1 : 0));
@@ -45,7 +45,7 @@ function squadTable(G, ids, opts = {}) {
   const u = userP(G);
   const ps = ids.map(id => G.players[id]).filter(Boolean).sort((a, b) => ORDER[a.main] - ORDER[b.main] || b.ca - a.ca);
   return `<div class="tscroll"><table class="tbl"><thead><tr><th class="n">#</th><th>Pemain</th><th>Posisi</th><th class="n">Usia</th><th class="c">Kon</th><th class="c">Mor</th><th class="n">Main</th><th class="n">Gol</th><th class="n">Ast</th><th>Rata2</th><th class="n">KK</th><th class="n">KM</th></tr></thead><tbody>
-    ${ps.map(p => `<tr class="click ${p.id === u.id ? "me" : ""}" data-pid="${p.id}"><td class="n">${shirtNumber(G, p)}</td><td><span class="row" style="gap:6px">${esc(shortName(p))}${p.injury ? '<span class="chip inj">Cdr</span>' : ""}${p.ban > 0 ? '<span class="chip ban">Skr</span>' : ""}${p.away ? '<span class="chip nt">Tmn</span>' : ""}</span></td><td>${esc(positionString(p))}</td><td class="n">${ageOn(p.birth, G.date)}</td><td class="c">${p.injury ? '<span style="color:var(--bad)">✚</span>' : heart(p.cond)}</td><td class="c">${moraleFace(p.morale ?? 65)}</td><td class="n">${p.st.apps}${p.st.sub ? `(${p.st.sub})` : ""}</td><td class="n">${p.st.gls}</td><td class="n">${p.st.ast}</td><td>${pill(avgR(p.st))}</td><td class="n">${p.st.yc}</td><td class="n">${p.st.rc}</td></tr>`).join("")}
+    ${ps.map(p => `<tr class="click ${p.id === u.id ? "me" : ""}" data-pid="${p.id}"><td class="n">${shirtNumber(G, p)}</td><td><span class="row" style="gap:6px">${esc(shortName(p))}${p.injury ? '<span class="chip inj">Cdr</span>' : ""}${Object.values(p.bans || {}).some(x => x > 0) ? '<span class="chip ban">Skr</span>' : ""}${p.away ? '<span class="chip nt">Tmn</span>' : ""}</span></td><td>${esc(positionString(p))}</td><td class="n">${ageOn(p.birth, G.date)}</td><td class="c">${p.injury ? '<span style="color:var(--bad)">✚</span>' : heart(p.cond)}</td><td class="c">${moraleFace(p.morale ?? 65)}</td><td class="n">${p.st.apps}${p.st.sub ? `(${p.st.sub})` : ""}</td><td class="n">${p.st.gls}</td><td class="n">${p.st.ast}</td><td>${pill(avgR(p.st))}</td><td class="n">${p.st.yc}</td><td class="n">${p.st.rc}</td></tr>`).join("")}
   </tbody></table></div>`;
 }
 register("skuad", "utama", (G, root) => {

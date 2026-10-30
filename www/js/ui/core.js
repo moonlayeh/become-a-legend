@@ -5,14 +5,26 @@ import { RNG } from "../rng.js";
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-export const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-export const money = v => `€${Math.round(v).toLocaleString("id-ID")}`;
+// money tokens from the engine (⟦w:euro⟧ weekly/whole amounts, ⟦m:millions⟧) become the chosen currency
+export const moneyText = s => String(s ?? "").replace(/⟦w:(-?[\d.]+)⟧/g, (_, v) => money(+v)).replace(/⟦m:(-?[\d.]+)⟧/g, (_, v) => moneyM(+v));
+export const esc = s => moneyText(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Game money is stored in euro. Display rates: Kurs Menteri Keuangan (KMK) per 30 Oktober 2026
+// (USD Rp17.946,00; EUR Rp20.088,08; GBP Rp23.780,53).
+export const CURRENCIES = { IDR: { sym: "Rp", rate: 20088.08, label: "Rupiah Indonesia" }, EUR: { sym: "€", rate: 1, label: "Euro" }, USD: { sym: "$", rate: 20088.08 / 17946, label: "Dolar AS" }, GBP: { sym: "£", rate: 20088.08 / 23780.53, label: "Pound Sterling" } };
+let CUR = CURRENCIES.IDR;
+export function setCurrency(code) { CUR = CURRENCIES[code] || CURRENCIES.IDR; }
+const fmt1 = (x, d) => x.toFixed(d).replace(".", ",").replace(/,0$/, "");
+export const money = v => `${CUR.sym}${Math.round(v * CUR.rate).toLocaleString("id-ID")}`;
 export function moneyShort(v) { // v in euro
-  if (v >= 1e9) return `€${(v / 1e9).toFixed(1).replace(".", ",")}M`;
-  if (v >= 1e6) return `€${(v / 1e6).toFixed(v >= 1e7 ? 0 : 1).replace(".", ",")}Jt`;
-  if (v >= 1e3) return `€${Math.round(v / 1e3)}Rb`;
-  return `€${Math.round(v)}`;
+  const x = v * CUR.rate;
+  if (x >= 1e12) return `${CUR.sym}${fmt1(x / 1e12, 1)}T`;
+  if (x >= 1e9) return `${CUR.sym}${fmt1(x / 1e9, x >= 1e10 ? 0 : 1)}M`;
+  if (x >= 1e6) return `${CUR.sym}${fmt1(x / 1e6, x >= 1e7 ? 0 : 1)}Jt`;
+  if (x >= 1e3) return `${CUR.sym}${Math.round(x / 1e3)}Rb`;
+  return `${CUR.sym}${Math.round(x)}`;
 }
+// amounts given in millions of euro (transfer fees)
+export const moneyM = m => moneyShort(m * 1e6);
 
 // ---------- colour ----------
 export function hexToHsl(hex) {
@@ -165,7 +177,7 @@ export const attrClass = v => (v >= 15 ? "v-hi" : v >= 10 ? "v-mid" : "v-lo");
 export const heading = (t, link = false) => `<h3 class="ch${link ? " link" : ""}">${esc(t)}</h3>`;
 export function bars(n, of, cls = "") { let s = ""; for (let i = 1; i <= of; i++) s += `<i class="${i <= n ? "on" : ""}"></i>`; return `<span class="segbar ${cls}">${s}</span>`; }
 export function toast(msg) {
-  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t);
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = moneyText(msg); document.body.appendChild(t);
   setTimeout(() => t.remove(), 2600);
 }
 export const shortDay = n => { const d = new Date(Date.UTC(2000, 0, 1) + n * 864e5); return `${d.getUTCDate()}/${d.getUTCMonth() + 1}/${String(d.getUTCFullYear()).slice(2)}`; };

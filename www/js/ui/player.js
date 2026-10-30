@@ -1,15 +1,15 @@
 // Player profile (any player), Latihan (individual training, calendar, medical centre)
 import { register, go, save, S, render } from "./shell.js";
-import { $, $$, esc, crest, pill, pill1, stars, avatar, lookFor, natTag, flagEmoji, heading, toast, moneyShort, attrClass, bars, shortDay, jersey } from "./core.js";
+import { $, $$, esc, crest, pill, pill1, stars, avatar, lookFor, natTag, flagEmoji, heading, toast, moneyShort, attrClass, bars, shortDay, jersey, CURRENCIES } from "./core.js";
 import { NATIONS, POS_LABEL } from "../data.js";
 import { ATTRS, A, GROUPS } from "../attributes.js";
 import { fmt, fmtDay, ymd, ageOn, seasonLabel, BULAN } from "../calendar.js";
-import { userP, userClub, FOCUS_LIST, weeksLabel } from "../world.js";
+import { userP, userClub, FOCUS_LIST, weeksLabel, banTotal } from "../world.js";
 import { fullName, shortName, personality, marketValue } from "../player.js";
-import { squadStatus, coachReport, fed, fmtM } from "../career.js";
+import { squadStatus, coachReport, fed, fmtM, trainingSessionsToday, doTraining, EFFORT, F } from "../career.js";
 import { canSwitch } from "../intl.js";
-import { shirtNumber } from "../sim.js";
-import { ROLES, roleStars, bestRole, attrHighlights, positionString, PITCH_XY, famWord, FAM_WORDS, reputation, REP_COLOR, footWord, footLevel, fitnessWord, moraleWord, moraleFace, severity, severityWord, returnRange, clubMatchDays } from "../meta.js";
+import { shirtNumber, rngOf } from "../sim.js";
+import { ROLES, roleStars, bestRole, attrHighlights, positionString, PITCH_XY, famWord, FAM_WORDS, reputation, REP_COLOR, footWord, footLevel, fitnessWord, moraleWord, moraleFace, severity, severityWord, returnRange, clubMatchDays, staffOf, SESS, SESS_COLOR, userMatchDays } from "../meta.js";
 import { STYLES } from "../world.js";
 
 const FOCUS_ATTRS = {
@@ -45,7 +45,14 @@ const intlLine = (G, p) => {
   return caps ? `${caps} penampilan, ${p.intGoals || 0} gol` : yc ? `Belum pernah tampil senior · ${yc} laga usia muda` : "Belum Pernah Tampil";
 };
 
-function header(G, p) {
+function actionRow(G, p) {
+  if (G.user.retired) return "";
+  const u = userP(G);
+  if (p.isUser) return `<div class="row" style="gap:8px;padding:0 12px 12px"><button class="btn sm" data-act="coach" style="flex:1">💬 Pelatih</button><button class="btn sm" data-act="agent" style="flex:1">💼 Agen</button>${G.neg && ["open", "final"].includes(G.neg.status) ? '<button class="btn sm pri" data-go="pemain/negosiasi" style="flex:1">📝 Negosiasi</button>' : ""}</div>`;
+  if (p.club === u.club) return `<div class="row" style="gap:8px;padding:0 12px 12px"><button class="btn sm" data-act="mate" data-mpid="${p.id}" style="flex:1">💬 Ajak bicara</button><button class="btn sm" data-go="pemain/bandingkan" data-p='{"pid":${p.id}}' style="flex:1">⇄ Bandingkan</button></div>`;
+  return `<div class="row" style="gap:8px;padding:0 12px 12px"><button class="btn sm" data-go="pemain/bandingkan" data-p='{"pid":${p.id}}' style="flex:1">⇄ Bandingkan denganku</button></div>`;
+}
+export function header(G, p) {
   const club = G.clubs[p.club];
   const age = ageOn(p.birth, G.date);
   const rep = club ? coachReport(G, p) : { ca: 0, pa: 0 };
@@ -57,7 +64,7 @@ function header(G, p) {
       <div class="nm">${esc(fullName(p))}${club ? `<span class="no">${shirtNumber(G, p)}</span>` : ""}</div>
       <div class="sub">${esc(POS_LABEL[p.main])}</div>
       <div class="sub" style="margin-top:2px">${natLabel} · ${age} tahun (${fmt(p.birth)})</div>
-      <div class="row wrap" style="margin-top:6px;gap:4px">${p.injury ? `<span class="chip inj">✚ ${esc(p.injury.name)}</span>` : ""}${p.ban > 0 ? `<span class="chip ban">Skorsing ${p.ban}</span>` : ""}${p.away ? '<span class="chip nt">Timnas</span>' : ""}${p.isUser && G.user.loan ? '<span class="chip loan">Pinjaman</span>' : ""}</div>
+      <div class="row wrap" style="margin-top:6px;gap:4px">${p.injury ? `<span class="chip inj">✚ ${esc(p.injury.name)}</span>` : ""}${banTotal(p) > 0 ? `<span class="chip ban">Skorsing ${banTotal(p)}</span>` : ""}${p.away ? '<span class="chip nt">Timnas</span>' : ""}${p.isUser && G.user.loan ? '<span class="chip loan">Pinjaman</span>' : ""}</div>
     </div></div>
     <div class="kv">
       <div class="click" ${club ? `data-club="${club.id}"` : ""}><div class="k">Klub</div><div class="v"><span class="row" style="gap:6px">${club ? crest(club, 18) : ""}${esc(club?.name || "Tanpa klub")}</span></div><div class="k">${esc(club ? G.leagues[club.league]?.name || "" : "")}</div></div>
@@ -66,7 +73,7 @@ function header(G, p) {
       <div><div class="k">Kontrak</div><div class="v">${p.contract?.youth ? "Kontrak akademi" : `${moneyShort(p.contract?.wage || 0)} p/mgg`}</div><div class="k">s.d. 30/6/${(p.contract?.end || 0) + 1}</div></div>
       <div><div class="k">Status</div><div class="v">${esc(status)}</div></div>
       <div><div class="k">Kemampuan · Potensi</div><div>${stars(rep.ca, "Kemampuan ")} ${stars(rep.pa, "Potensi ")}</div></div>
-    </div></div>`;
+    </div>${actionRow(G, p)}</div>`;
 }
 
 // ---------- PEMAIN / RINGKASAN ----------
@@ -86,7 +93,7 @@ register("pemain", "ringkasan", (G, root, prm) => {
   const totApps = own ? (G.user.history || []).reduce((s, h) => s + h.apps + h.sub + (h.u19?.apps || 0), 0) + st.apps + st.sub : st.apps + st.sub;
   const totGls = own ? (G.user.history || []).reduce((s, h) => s + h.gls + (h.u19?.gls || 0), 0) + st.gls : st.gls;
   const traits = own ? (G.user.styles || []).map(k => STYLES[k]?.label).filter(Boolean) : [];
-  const yc = p.ycCount || 0;
+  const yc = p.ycs?.liga || 0;
   root.innerHTML = header(G, p) + `
   <div class="card"><div class="spread"><div><div class="lbl">Posisi</div><b>${esc(positionString(p))}</b></div><span class="muted" style="font-size:13px">${esc(POS_LABEL[p.main])}</span></div>
     <div style="margin:10px 0">${posPitch(p)}</div>
@@ -104,7 +111,7 @@ register("pemain", "ringkasan", (G, root, prm) => {
   </div>
   <div class="ch" style="font-size:14px;margin-top:12px">Larangan Bermain</div>
   <div class="spread" style="font-size:13.5px"><span>${esc(G.leagues[G.clubs[p.club]?.league]?.name || "Liga")}</span><span class="row">${yc % 5}/5 ${bars(yc % 5, 5, "y")}</span></div>
-  ${p.ban > 0 ? `<div style="color:var(--bad);font-size:13.5px;margin-top:4px">Skorsing ${p.ban} laga</div>` : ""}</div>
+  ${banTotal(p) > 0 ? `<div style="color:var(--bad);font-size:13.5px;margin-top:4px">Skorsing ${Object.entries(p.bans).filter(([, n]) => n > 0).map(([k, n]) => `${n} laga (${k === "liga" ? "liga" : esc(G.comps[k]?.short || G.comps[k]?.name || k)})`).join(", ")}</div>` : ""}</div>
   <div class="bcards">
     <div class="bcard"><div class="ch">Kebahagiaan</div><div style="font-size:24px">${moraleFace(p.morale ?? 65)}</div><div class="big">${moraleWord(p.morale ?? 65)}</div></div>
     <div class="bcard"><div class="ch">Kebugaran</div><div style="font-size:22px;color:${p.injury ? "var(--bad)" : "var(--good)"}">${p.injury ? "✚" : "♥"}</div><div class="big">${p.injury ? "Cedera" : fitnessWord(p.cond)}</div><div class="muted" style="font-size:12.5px">${p.injury ? `Kembali ${returnRange(p.injury.days)}` : `Ketajaman ${Math.round(p.sharp ?? 60)}%`}</div></div>
@@ -127,46 +134,12 @@ function footBlock(p) {
   return blk("Kaki Kiri", left) + blk("Kaki Kanan", right);
 }
 
-// ---------- PEMAIN / PERFORMA ----------
-register("pemain", "performa", (G, root, prm) => {
-  const p = G.players[prm.pid] || userP(G);
-  const own = p.isUser;
-  const row = (k, s) => `<tr><td>${k}</td><td class="n">${s.apps}${s.sub ? ` (${s.sub})` : ""}</td><td class="n">${s.min}</td><td class="n">${s.gls}</td><td class="n">${s.ast}</td><td class="n">${s.pom || 0}</td><td class="n">${s.yc}</td><td>${pill(avgR(s))}</td></tr>`;
-  const cs = own ? G.user.cs : null;
-  const league = G.leagues[G.clubs[p.club]?.league]?.name || "Liga";
-  root.innerHTML = header(G, p) + `<div class="card"><div class="ch">Statistik Musim ${seasonLabel(G.season)}</div><div class="tscroll"><table class="tbl"><thead><tr><th>Kompetisi</th><th class="n">Main</th><th class="n">Menit</th><th class="n">Gol</th><th class="n">Ast</th><th class="n">PTP</th><th class="n">KK</th><th>Rata2</th></tr></thead><tbody>
-    ${own ? `${row(esc(league), cs.liga)}${cs.u19.apps + cs.u19.sub ? row("Liga U-19", cs.u19) : ""}${cs.timnas.apps + cs.timnas.sub ? row("Timnas", cs.timnas) : ""}` : row(esc(league), p.st)}
-  </tbody></table></div><div class="muted" style="font-size:12px;margin-top:6px">PTP = pemain terbaik pertandingan</div></div>
-  ${own ? `<div class="card"><div class="ch">Laga Terakhir</div>${(G.user.matchLog || []).length ? `<div class="tscroll"><table class="tbl"><thead><tr><th>Tgl</th><th>Lawan</th><th class="c">K/T</th><th class="c">Skor</th><th class="n">Mnt</th><th class="n">G</th><th class="n">A</th><th>Rating</th></tr></thead><tbody>${G.user.matchLog.slice(0, 15).map(m => `<tr><td>${shortDay(m.date)}</td><td>${esc(m.opp)}<div class="muted" style="font-size:11.5px">${esc(m.comp)}</div></td><td class="c">${m.ha}</td><td class="c"><span class="tag" style="border-color:${m.score[0] > m.score[1] ? "var(--good)" : m.score[0] < m.score[1] ? "var(--bad)" : "#888"}">${m.score[0]}-${m.score[1]}</span></td><td class="n">${m.min}</td><td class="n">${m.gls || ""}</td><td class="n">${m.ast || ""}</td><td>${pill1(m.rating)}${m.pom ? " ★" : ""}</td></tr>`).join("")}</tbody></table></div>` : '<div class="empty">Belum ada laga.</div>'}</div>
-  <div class="card"><div class="ch">Grafik Rating</div>${ratingChart(G.user.matchLog || [])}</div>` : ""}`;
-});
-function ratingChart(log) {
+export function ratingChart(log) {
   const pts = log.slice(0, 20).reverse();
   if (pts.length < 2) return '<div class="muted">Butuh minimal dua laga.</div>';
   const W = 320, H = 120, x = i => 20 + i * ((W - 30) / (pts.length - 1)), y = r => H - 14 - ((r - 5) / 5) * (H - 24);
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Rating ${pts.length} laga terakhir">${[6, 7, 8, 9].map(v => `<line x1="20" x2="${W - 8}" y1="${y(v)}" y2="${y(v)}" stroke="rgba(255,255,255,.08)"/><text x="2" y="${y(v) + 4}" font-size="9" fill="#888">${v}</text>`).join("")}<polyline fill="none" stroke="#c5d84a" stroke-width="2" points="${pts.map((m, i) => `${x(i)},${y(m.rating)}`).join(" ")}"/>${pts.map((m, i) => `<circle cx="${x(i)}" cy="${y(m.rating)}" r="3" fill="${m.rating >= 7.5 ? "#8fd14f" : m.rating >= 6.5 ? "#d8c94a" : "#e08a4a"}"/>`).join("")}</svg>`;
 }
-
-// ---------- PEMAIN / KARIER ----------
-register("pemain", "karier", (G, root, prm) => {
-  const p = G.players[prm.pid] || userP(G);
-  if (!p.isUser) { root.innerHTML = header(G, p) + `<div class="card"><div class="ch">Karier</div><table class="tbl"><tbody><tr><td>${seasonLabel(G.season)}</td><td>${esc(G.clubs[p.club]?.name || "")}</td><td class="n">${p.st.apps + p.st.sub}</td><td class="n">${p.st.gls}</td></tr></tbody></table><p class="muted" style="font-size:13px">Riwayat lengkap hanya dicatat untuk kariermu sendiri.</p></div>`; return; }
-  const u = G.user, H = u.history;
-  const sw = canSwitch(G);
-  const caps = p.caps || 0;
-  root.innerHTML = header(G, p) + `
-  <div class="card"><div class="ch">Riwayat Musim</div>${H.length ? `<div class="tscroll"><table class="tbl"><thead><tr><th>Musim</th><th>Klub</th><th class="n">Main</th><th class="n">Gol</th><th class="n">Ast</th><th>Rata2</th><th>Catatan</th></tr></thead><tbody>${H.map(h => `<tr><td>${h.season}</td><td><span class="row" style="gap:6px">${crest(G.clubs[h.club], 18)}${esc(h.clubName)}${h.loan ? " (P)" : ""}</span><div class="muted" style="font-size:11.5px">${esc(h.league)}${h.pos ? ` · ke-${h.pos}` : ""}</div></td><td class="n">${h.apps}${h.sub ? ` (${h.sub})` : ""}</td><td class="n">${h.gls}</td><td class="n">${h.ast}</td><td>${pill(h.rating)}</td><td style="font-size:12.5px;white-space:normal;min-width:140px">${[h.u19 ? `U-19: ${h.u19.apps} laga, ${h.u19.gls} gol` : "", ...(h.cups || []).map(c => `${G.comps[c.comp]?.short || c.comp}: ${c.apps} laga, ${c.gls} gol`), h.intl ? `Timnas: ${h.intl.apps} laga, ${h.intl.gls} gol` : "", h.ballon ? `Bola Emas #${h.ballon}` : "", ...h.notes].filter(Boolean).map(esc).join(" · ")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="muted">Musim pertama belum selesai.</div>'}</div>
-  <div class="card"><div class="ch">Trofi</div>${u.trophies.map(t => `<div class="spread" style="padding:5px 0;border-top:1px solid var(--line);font-size:14px"><span>🏆 ${esc(t.name)} <span class="muted">· ${esc(t.club)}</span></span><span class="num muted">${esc(t.year)}</span></div>`).join("") || '<div class="muted">Belum ada trofi.</div>'}</div>
-  <div class="card"><div class="ch">Penghargaan</div>${u.awards.map(t => `<div class="spread" style="padding:5px 0;border-top:1px solid var(--line);font-size:14px"><span>🎖 ${esc(t.name)}${t.detail ? ` <span class="muted">· ${esc(t.detail)}</span>` : ""}</span><span class="num muted">${esc(t.year)}</span></div>`).join("") || '<div class="muted">Belum ada penghargaan.</div>'}</div>
-  <div class="card"><div class="ch">Timnas</div><div class="kv" style="margin:0">
-    <div><div class="k">Federasi</div><div class="v">${flagEmoji(fed(G))} ${esc(NATIONS[fed(G)].name)}</div></div>
-    <div><div class="k">Senior</div><div class="v">${caps} laga, ${p.intGoals || 0} gol</div></div>
-    ${Object.entries(u.int.youth || {}).map(([k, v]) => `<div><div class="k">${esc(k)}</div><div class="v">${v} laga</div></div>`).join("")}
-    ${u.debut ? `<div><div class="k">Debut senior</div><div class="v">${fmt(u.debut.date)} vs ${esc(NATIONS[u.debut.opp]?.name || "")}</div></div>` : ""}
-  </div>${p.nat2 ? `<div class="muted" style="font-size:13px;margin-top:8px">Kewarganegaraan ganda: ${esc(NATIONS[p.nat].name)} & ${esc(NATIONS[p.nat2].name)}. ${sw.ok ? "Kamu masih bisa pindah federasi (sekali) bila dipanggil negara lain." : esc(sw.why)}</div>` : ""}</div>
-  <div class="card"><div class="ch">Perpindahan</div>${(u.moves || []).map(m => `<div style="padding:5px 0;border-top:1px solid var(--line);font-size:14px">${fmt(m.date)} · ${esc(G.clubs[m.from]?.short || "")} → <b>${esc(G.clubs[m.to]?.name || "")}</b> <span class="muted">${m.type === "loan" ? "pinjaman" : m.fee ? "€" + fmtM(m.fee) : "gratis"}</span></div>`).join("") || '<div class="muted">Belum pernah pindah klub.</div>'}</div>
-  <div class="card"><div class="ch">Riwayat Cedera</div>${(u.injuries || []).slice().reverse().slice(0, 10).map(i => `<div class="spread" style="padding:5px 0;border-top:1px solid var(--line);font-size:14px"><span>${esc(i.name)}</span><span class="muted">${fmt(i.date)} · ${weeksLabel(i.days)}</span></div>`).join("") || '<div class="muted">Belum pernah cedera.</div>'}</div>`;
-});
 
 // ---------- LATIHAN / INDIVIDU ----------
 register("latihan", "individu", (G, root, prm) => {
@@ -229,4 +202,74 @@ register("latihan", "medis", (G, root) => {
     <div class="bcard"><div class="ch">Ringkasan Musim</div><div class="big">${club.injCount || 0} cedera</div><div class="muted" style="font-size:12.5px">sejak awal musim</div></div>
     <div class="bcard"><div class="ch">Kamu</div><div class="big">${(G.user.injuries || []).length} cedera</div><div class="muted" style="font-size:12.5px">sepanjang karier</div></div>
   </div>`;
+});
+
+// ---------- SESI LATIHAN (daily session) ----------
+register("latihan", "sesi", (G, root, prm) => {
+  const u = userP(G), club = userClub(G);
+  const list = trainingSessionsToday(G);
+  const coach = staffOf(G, club.id).find(s => s.role === (u.squad === "Y" ? "Pelatih U-19" : "Manajer"))?.name || "Pelatih";
+  const last = G.user.lastTraining;
+  const due = G.trainingDue && list && G.user.trainDone !== G.date;
+  const sessCard = sessions => sessions.map(x => `<div class="spread" style="padding:7px 0;border-top:1px solid var(--line)"><span class="row" style="gap:8px"><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${SESS_COLOR[x.cat]}"></i>${esc(x.name)}</span>${x.rating != null ? pill(x.rating) : '<span class="muted">Istirahat</span>'}</div>`).join("");
+  if (due) {
+    const eff = prm.eff || G.user.lastEffort || "Normal";
+    root.innerHTML = `<div class="card" style="border-left:3px solid var(--go-a)"><div class="ch">Sesi Latihan · ${esc(fmtDay(G.date))}</div>
+      <div class="muted" style="font-size:13.5px">${esc(club.name)}${u.squad === "Y" ? " U-19" : ""} · dipimpin ${esc(coach)}</div>
+      ${list.map(k => `<div class="spread" style="padding:7px 0;border-top:1px solid var(--line);margin-top:6px"><span class="row" style="gap:8px"><i style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${SESS_COLOR[SESS[k][1]]}"></i>${esc(SESS[k][0])}</span></div>`).join("")}
+      <div class="muted" style="font-size:13px;margin-top:8px">Kondisi sekarang ${Math.round(u.cond)}% · Ketajaman ${Math.round(u.sharp ?? 60)}%</div></div>
+    <div class="card"><div class="ch">Seberapa keras kamu berlatih hari ini?</div>
+      ${Object.entries(EFFORT).map(([k, e]) => `<button class="pick" data-eff="${k}" aria-pressed="${eff === k}"><span class="bx"></span><span><b>${esc(e.label)}</b><span>${esc(e.desc)}</span></span></button>`).join("")}
+      <label class="row" style="gap:8px;margin:10px 0 2px;font-size:14px"><input type="checkbox" id="extra" ${prm.extra ? "checked" : ""} style="width:20px;height:20px"> Tambah latihan individu setelah sesi (lebih lelah, perkembangan sedikit lebih cepat)</label>
+      <button class="btn pri" id="dotrain" style="width:100%;min-height:48px;margin-top:10px;font-family:var(--display);font-size:20px">Mulai Latihan</button>
+      <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="autoweek" style="flex:1">Otomatis sampai laga berikutnya</button></div>
+      <p class="muted" style="font-size:12.5px;margin-top:8px">Berhenti di setiap sesi latihan bisa dimatikan di Pengaturan.</p></div>`;
+    $$("[data-eff]", root).forEach(b => (b.onclick = () => go("latihan", "sesi", { ...prm, eff: b.dataset.eff, extra: $("#extra", root).checked }, true)));
+    $("#dotrain", root).onclick = () => {
+      const rng = rngOf(G); G.user.lastEffort = eff;
+      doTraining(G, rng, eff, $("#extra", root).checked); G.rs = rng.s; save();
+      go("latihan", "sesi", { done: 1 }, true);
+    };
+    $("#autoweek", root).onclick = () => {
+      const md = [...userMatchDays(G)].filter(([d, m]) => d >= G.date && !m.res).sort((a, b) => a[0] - b[0])[0];
+      G.user.autoTrainUntil = md ? md[0] : G.date + 7; G.user.autoEffort = eff;
+      const rng = rngOf(G); doTraining(G, rng, eff, false, true); G.rs = rng.s; save();
+      toast("Latihan berjalan otomatis sampai laga berikutnya."); go("portal", "ringkasan", {}, true); S.onGo?.();
+    };
+    return;
+  }
+  if (!last) { root.innerHTML = `<div class="card">Belum ada sesi latihan. Sesi berikutnya muncul saat kamu menekan Lanjutkan di hari latihan.</div>`; return; }
+  root.innerHTML = `<div class="card"><div class="ch">Hasil Latihan · ${esc(fmtDay(last.date))}</div>
+      <div class="spread" style="margin:4px 0 8px"><span class="muted">Usaha: <b style="color:#fff">${esc(last.effort)}</b>${last.extra ? " + latihan individu" : ""}${last.auto ? " (otomatis)" : ""}</span><span>Rata-rata ${pill(last.avg)}</span></div>
+      ${sessCard(last.sessions)}
+      <div class="muted" style="font-size:13.5px;margin-top:8px">Kondisi ${last.condBefore}% → ${last.condAfter}%${last.injury ? ` · <b style="color:var(--bad)">${esc(last.injury.name)} (${last.injury.days} hari)</b>` : ""}</div></div>
+    <div class="card"><div class="ch">Kata Pelatih</div><div style="font-size:15px">"${esc(last.coach)}"</div></div>
+    <div class="card"><div class="ch">Peringkat Latihan Hari Ini</div><div class="muted" style="font-size:13px;margin-bottom:6px">Kamu peringkat ${last.rank} dari ${last.board.length}</div>
+      ${last.board.map((x, i) => `<div class="spread ${x.me ? "me" : ""}" style="padding:5px 4px;border-top:1px solid var(--line);font-size:14px;${x.me ? "background:rgba(255,213,74,.12)" : ""}"><span>${i + 1}. ${esc(x.name)}${x.me ? " (kamu)" : ""}</span>${pill(x.rating)}</div>`).join("")}</div>
+    ${G.pending || G.trainingDue ? "" : `<button class="btn pri" id="contd" style="width:100%;min-height:48px;font-family:var(--display);font-size:20px">Lanjutkan Hari</button>`}`;
+  $("#contd", root)?.addEventListener("click", () => { go("portal", "ringkasan", {}, true); S.onGo?.(); });
+});
+
+// ---------- PENGATURAN ----------
+register("pengaturan", "umum", (G, root) => {
+  const st = G.settings;
+  const seg = (key, opts) => `<div class="seg">${opts.map(([v, l]) => `<button data-set="${key}" data-v="${v}" aria-pressed="${String(st[key]) === String(v)}">${l}</button>`).join("")}</div>`;
+  root.innerHTML = `<div class="card"><div class="ch">Wilayah</div>
+      <div class="lbl" style="margin-bottom:6px">Bahasa</div><div style="margin-bottom:12px">Bahasa Indonesia</div>
+      <div class="lbl" style="margin-bottom:6px">Mata uang</div>${seg("currency", Object.entries(CURRENCIES).map(([k, c]) => [k, `${c.sym} ${k}`]))}
+      <p class="muted" style="font-size:12.5px;margin-top:6px">Konversi memakai Kurs Menteri Keuangan per 30 Oktober 2026 (EUR Rp20.088,08; USD Rp17.946,00; GBP Rp23.780,53), dibuat tetap agar angka di gim tidak berubah-ubah.</p></div>
+    <div class="card"><div class="ch">Permainan</div>
+      <div class="lbl" style="margin-bottom:6px">Berhenti di setiap sesi latihan</div>${seg("trainStop", [[true, "Ya"], [false, "Tidak, otomatis"]])}
+      <div class="lbl" style="margin:12px 0 6px">Usaha saat latihan otomatis</div>${seg("autoEffort", Object.keys(EFFORT).map(k => [k, k]))}
+      <div class="lbl" style="margin:12px 0 6px">Kecepatan awal laga 2D</div>${seg("speed", [[10, "×10"], [25, "×25"], [60, "×60"]])}</div>
+    <div class="card"><div class="ch">Tampilan</div>
+      <div class="lbl" style="margin-bottom:6px">Skala teks</div>${seg("textScale", [[0.9, "Kecil"], [1, "Normal"], [1.1, "Besar"], [1.2, "Lebih Besar"]])}</div>
+    <div class="card"><div class="ch">Penyimpanan</div><p class="muted" style="font-size:13.5px">Karier tersimpan otomatis setiap kali proses berhenti (laga, pesan, latihan).</p><button class="btn" id="savenow">Simpan sekarang</button></div>`;
+  $$("[data-set]", root).forEach(b => (b.onclick = () => {
+    const k = b.dataset.set; let v = b.dataset.v;
+    if (v === "true" || v === "false") v = v === "true"; else if (!isNaN(+v)) v = +v;
+    st[k] = v; if (k === "autoEffort") G.user.autoEffort = v;
+    save(); render();
+  }));
+  $("#savenow", root).onclick = () => { save(); toast("Karier disimpan."); };
 });

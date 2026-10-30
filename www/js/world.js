@@ -170,20 +170,25 @@ export function makeFixtures(G, rng, L, season, phase) {
   }));
   L.season = season; L.phase = phase || null; L.state = "run"; L.po = null;
   // league statistics start again with the new season
-  for (const id of L.teams) for (const pid of G.clubs[id].squad) { const p = G.players[pid]; if (p) { p.st = newStats(); p.ycCount = 0; } }
+  for (const id of L.teams) for (const pid of G.clubs[id].squad) { const p = G.players[pid]; if (p) { p.st = newStats(); if (p.ycs) p.ycs.liga = 0; } }
 }
 export const leagueSeasonLabel = L => (L.cal === "aug" ? seasonLabelOf(L.season) : L.cal === "half" ? `${L.phase || "Clausura"} ${L.season}` : String(L.season));
 const seasonLabelOf = s => `${s}/${String((s + 1) % 100).padStart(2, "0")}`;
 
 // ---------- selection ----------
-export function available(G, pid, date) {
+// suspensions are kept per competition: "liga", a cup/continental id, …
+export const YC_LIMIT = key => (key === "liga" ? 5 : 3);
+export const banned = (p, key = "liga") => (p.bans?.[key] || 0) > 0;
+export const banTotal = p => Object.values(p.bans || {}).reduce((s, x) => s + x, 0);
+export function available(G, pid, key = "liga") {
   const p = G.players[pid];
-  return p && !p.retired && !p.injury && !(p.ban > 0);
+  return p && !p.retired && !p.injury && !banned(p, key);
 }
 export function pickTeam(G, clubId, rng, opts = {}) {
   const club = G.clubs[clubId];
-  const pool = (opts.youth ? club.youthSquad : club.squad).filter(id => available(G, id)).map(id => G.players[id]);
-  if (!opts.youth && pool.length < 16) pool.push(...club.youthSquad.map(id => G.players[id]).filter(p => !p.injury && !(p.ban > 0)).sort((a, b) => b.ca - a.ca).slice(0, 16 - pool.length));
+  const key = opts.comp || "liga";
+  const pool = (opts.youth ? club.youthSquad : club.squad).filter(id => available(G, id, key)).map(id => G.players[id]);
+  if (!opts.youth && pool.length < 16) pool.push(...club.youthSquad.map(id => G.players[id]).filter(p => p && !p.injury && !banned(p, key)).sort((a, b) => b.ca - a.ca).slice(0, 16 - pool.length));
   const form = FORMATIONS[club.formation] || FORMATIONS["4-3-3"];
   const used = new Set();
   const xi = [];
@@ -306,6 +311,7 @@ export function createWorld(f) {
   const G = {
     v: VERSION, seed, rs: 0, date: start, season: 2026, nextId: 1, players: {}, clubs: {}, leagues: {}, comps: {}, pools: {}, blocked: {},
     user: null, inbox: [], news: [], intl: { nt: {} }, flags: [], lastMatch: null,
+    settings: { trainStop: true, currency: "IDR", textScale: 1, speed: 25 },
   };
   for (const L of LEAGUES) G.leagues[L.id] = { ...L, teams: [], fixtures: [], history: [] };
   for (const c of CLUBS) {
@@ -317,8 +323,9 @@ export function createWorld(f) {
   // ---- the user ----
   const nat = f.nat;
   const hard = f.difficulty === "Keras";
-  let birth = f.birth ?? birthForAge(rng, clamp(+f.age || 16, 15, 18), start);
+  let birth = f.birth ?? birthForAge(rng, clamp(+f.age || 16, 15, 35), start);
   let age = ageOn(birth, start);
+  if (age >= 19) { const band = POTENTIAL[f.potential] || POTENTIAL.Berbakat; f = { ...f, estCA: (band.pa[0] + band.pa[1]) / 2 * AGE_CURVE(age) }; }
   let clubId = f.club && f.club !== "acak" ? f.club : null;
   let note = null;
   const natsOf = cn => (f.nat2 === cn ? f.nat2 : nat);
@@ -338,15 +345,20 @@ export function createWorld(f) {
       if (near.length) clubId = rng.weighted(near, id => G.clubs[id].level);
     }
     if (!clubId || !inLg(clubId)) {
-      const teams = LEAGUES.filter(l => l.nation === homeNation && l.tier === 1).flatMap(l => G.leagues[l.id].teams);
-      clubId = rng.weighted(teams, id => G.clubs[id].youth ** 2 / (hard ? G.clubs[id].level / 60 : 1));
+      if (age >= 19) {
+        const teams = LEAGUES.filter(l => l.nation === homeNation).flatMap(l => G.leagues[l.id].teams);
+        clubId = rng.weighted(teams, id => 1 / (4 + Math.abs(G.clubs[id].level - (f.estCA || 100))));
+      } else {
+        const teams = LEAGUES.filter(l => l.nation === homeNation && l.tier === 1).flatMap(l => G.leagues[l.id].teams);
+        clubId = rng.weighted(teams, id => G.clubs[id].youth ** 2 / (hard ? G.clubs[id].level / 60 : 1));
+      }
     }
   } else {
     const euOK = NATIONS[nat]?.eu && age >= 16;
     if (!euOK && age < 18) { note = "Aturan FIFA melarang transfer internasional di bawah 18 tahun, jadi kariermu dimulai di usia 18."; birth = birthForAge(rng, 18, start); age = 18; }
     const leagues = euOK && age < 18 ? ["ESP1", "ITA1", "GER1", "FRA1", "POR1", "NED1", "BEL1"] : ["ESP1", "ITA1", "GER1", "FRA1", "ENG1", "POR1", "NED1", "BEL1"];
-    const teams = leagues.flatMap(l => G.leagues[l].teams).filter(id => clubNatOK(G.clubs[id], nat));
-    clubId = rng.weighted(teams, id => (hard ? 1 / G.clubs[id].level : 1) * G.clubs[id].youth);
+    const teams = (age >= 19 ? Object.keys(G.leagues) : leagues).flatMap(l => G.leagues[l].teams).filter(id => clubNatOK(G.clubs[id], nat));
+    clubId = age >= 19 ? rng.weighted(teams, id => 1 / (4 + Math.abs(G.clubs[id].level - (f.estCA || 100)))) : rng.weighted(teams, id => (hard ? 1 / G.clubs[id].level : 1) * G.clubs[id].youth);
   }
   const club = G.clubs[clubId];
   const u = buildUser(rng, { ...f, birth }, club, start, newPlayerId(G));
@@ -359,7 +371,7 @@ export function createWorld(f) {
   };
   G.user.adapt = needsLanguage(u, club) ? { lang: needsLanguage(u, club), since: start } : null;
   const Lu = G.leagues[club.league];
-  addMail(G, "Selamat datang di akademi", `${club.name} resmi menerimamu${u.squad === "Y" ? " di tim U-19" : " di skuad senior"}. Staf pelatih akan memantau perkembanganmu setiap pekan. ${Lu.name} ${Lu.cal === "aug" ? "musim 2026/27" : Lu.cal === "half" ? "Torneo Clausura 2026" : "2026"} ${Lu.cal === "aug" ? `dimulai ${fmt(day(2026, ...Lu.start))}` : "sedang berjalan"}.${note ? "\n\n" + note : ""}${G.user.adapt ? `\n\nKamu belum bisa berbahasa ${G.user.adapt.lang}; beberapa bulan pertama mungkin terasa berat.` : ""}`, "info", { from: "Kepala Akademi", cat: "Klub" });
+  addMail(G, u.squad === "Y" ? "Selamat datang di akademi" : `Selamat datang di ${club.short}`, `${club.name} resmi menerimamu${u.squad === "Y" ? " di tim U-19" : " di skuad senior"}. Staf pelatih akan memantau perkembanganmu setiap pekan. ${Lu.name} ${Lu.cal === "aug" ? "musim 2026/27" : Lu.cal === "half" ? "Torneo Clausura 2026" : "2026"} ${Lu.cal === "aug" ? `dimulai ${fmt(day(2026, ...Lu.start))}` : "sedang berjalan"}.${note ? "\n\n" + note : ""}${G.user.adapt ? `\n\nKamu belum bisa berbahasa ${G.user.adapt.lang}; beberapa bulan pertama mungkin terasa berat.` : ""}`, "info", { from: u.squad === "Y" ? "Kepala Akademi" : "Direktur Olahraga", cat: "Klub" });
   if (note && /FIFA/.test(note)) G.flags.push("FIFA-18");
   G.rs = rng.s;
   return G;
@@ -394,14 +406,27 @@ export function needsLanguage(p, club) {
   return l && !(p.langs || []).includes(l) ? l : null;
 }
 
+// potential bands the player can pick when creating a career
+export const POTENTIAL = {
+  Biasa: { label: "Biasa", desc: "Pemain profesional biasa; puncaknya pemain solid di liga menengah.", pa: [100, 135] },
+  Berbakat: { label: "Berbakat", desc: "Bisa menembus liga top bila berkembang dengan baik.", pa: [135, 162] },
+  Wonderkid: { label: "Wonderkid", desc: "Bakat langka dengan peluang jadi bintang dunia.", pa: [165, 196] },
+  Acak: { label: "Acak", desc: "Potensi dirahasiakan dan bisa sangat rendah atau sangat tinggi.", pa: [85, 200] },
+};
+// share of potential reached at each age for a player who started late
+const AGE_CURVE = a => (a <= 18 ? 0 : a <= 24 ? 0.68 + (a - 19) * 0.05 : a <= 29 ? 0.95 : Math.max(0.78, 0.95 - (a - 29) * 0.025));
 export function buildUser(rng, f, club, today, id) {
   const age = ageOn(f.birth, today);
-  const hard = f.difficulty === "Keras";
   const pos = f.pos;
-  const ca = clamp(Math.round(youthLevel(club, Math.min(age, 18)) + (age >= 18 ? 8 : 0) + (hard ? rng.normal(0, 9) : rng.float(4, 12))), 40, 140);
-  let pa = hard ? rng.int(85, 200) : Math.round(clamp(rng.normal(168, 14), 140, 196));
-  pa = Math.max(pa, ca + 10);
-  const squad = age >= 18 && ca >= club.level - 25 ? "A" : "Y";
+  const band = POTENTIAL[f.potential] || (f.difficulty === "Keras" ? POTENTIAL.Acak : POTENTIAL.Berbakat);
+  let pa = rng.int(...band.pa);
+  let ca;
+  if (age <= 18) ca = clamp(Math.round(youthLevel(club, age) + rng.float(2, 10)), 40, 140);
+  else ca = clamp(Math.round(pa * AGE_CURVE(age) + rng.normal(0, 4)), 45, 185);
+  ca = Math.min(ca, pa - (age <= 18 ? 15 : age <= 23 ? 6 : 0));
+  pa = Math.max(pa, ca + (age <= 23 ? 10 : 2));
+  // every career up to age 18 starts in the U-19 academy
+  const squad = age <= 18 ? "Y" : "A";
   const u = genPlayer(rng, { id, nat: f.nat, pos, ca, pa, birth: f.birth, club: club.id, squad, today, fn: f.fn, ln: f.ln, birthplace: f.birthplace });
   u.nat2 = f.nat2 && f.nat2 !== f.nat ? f.nat2 : null;
   u.nick = f.nick || "";
@@ -436,9 +461,9 @@ export function buildUser(rng, f, club, today, id) {
   }
   for (let i = 0; i < N_ATTR; i++) u.a[i] = Math.round(u.a[i] * 10) / 10;
   refreshCA(u);
-  u.pa = Math.max(u.pa, u.ca + 5);
+  u.pa = Math.max(u.pa, u.ca + (age <= 23 ? 5 : 1));
   u.isUser = true;
-  u.contract = age < 17 ? { end: seasonOf(today) + 1, wage: 0, youth: true } : { end: seasonOf(today) + 3, wage: Math.max(250, Math.round(fairWage(u, club.league) * 0.6 / 50) * 50) };
+  u.contract = age < 17 ? { end: seasonOf(today) + 1, wage: 0, youth: true } : { end: seasonOf(today) + (age <= 18 ? 2 : 3), wage: Math.max(250, Math.round(fairWage(u, club.league) * (age <= 18 ? 0.5 : 0.85) / 50) * 50), start: today };
   return u;
 }
 export const newCompStats = () => ({ liga: newStats(), u19: newStats(), timnas: newStats() });
@@ -506,8 +531,12 @@ export function applyLine(G, rng, p, L, comp, isUser) {
   p.cond = L.cond ?? clamp(p.cond - L.min * 0.12, 20, 100);
   p.sharp = clamp((p.sharp ?? 60) + L.min / 9, 0, 100);
   p.mins = (p.mins || 0) + L.min;
-  if (L.rc) p.ban = (p.ban || 0) + rng.int(1, 3);
-  if (comp === "liga" && L.yc) { p.ycCount = (p.ycCount || 0) + 1; if (p.ycCount % 5 === 0) p.ban = (p.ban || 0) + 1; }
+  if (!["timnas", "u19", "friendly"].includes(comp)) {
+    p.bans = p.bans || {}; p.ycs = p.ycs || {};
+    if (L.rc) p.bans[comp] = (p.bans[comp] || 0) + rng.int(1, 3);
+    if (L.yc) { p.ycs[comp] = (p.ycs[comp] || 0) + 1; if (p.ycs[comp] % YC_LIMIT(comp) === 0) { p.bans[comp] = (p.bans[comp] || 0) + 1; if (isUser) addMail(G, "Akumulasi kartu kuning", `Kamu mendapat kartu kuning ke-${p.ycs[comp]} dan terkena skorsing satu laga.`, "bad", { cat: "Kompetisi" }); } }
+    if (L.rc && isUser) addMail(G, "Kartu merah", `Kamu diusir wasit dan terkena skorsing ${p.bans[comp]} laga.`, "bad", { cat: "Kompetisi" });
+  }
   if (L.injured && !p.injury) {
     p.injury = makeInjury(rng, p, G.user.difficulty === "Keras" && isUser);
     p.injury.since = G.date;
@@ -536,7 +565,7 @@ const FOCUS = {
 export const FOCUS_LIST = Object.keys(FOCUS);
 const caFloat = (a, pos) => { const w = WEIGHTS[pos]; let s = 0; for (let i = 0; i < N_ATTR; i++) s += a[i] * w[i]; return (s / w.sum - 1) * 10.6; };
 
-export function developPlayer(G, rng, p, weeks = 1, playedShare = 0.5) {
+export function developPlayer(G, rng, p, weeks = 1, playedShare = 0.5, boost = 1) {
   const age = (G.date - p.birth) / 365.25;
   const club = G.clubs[p.club];
   const isUser = !!p.isUser;
@@ -551,7 +580,7 @@ export function developPlayer(G, rng, p, weeks = 1, playedShare = 0.5) {
   let intensity = 1;
   if (isUser) intensity = { Rendah: 0.85, Normal: 1, Tinggi: 1.15 }[G.user.training.intensity] || 1;
   const noise = Math.max(0, rng.normal(1, hard ? 0.45 : 0.3));
-  let g = gap > 0 ? r * Math.min(1.6, gap / 38) * prof * play * fac * intensity * noise * weeks : 0;
+  let g = gap > 0 ? r * Math.min(1.6, gap / 38) * prof * play * fac * intensity * boost * noise * weeks : 0;
   if (p.injury && p.injury.days > 14) g *= 0.25;
   const focus = isUser ? FOCUS[G.user.training.focus] || {} : {};
   const w = WEIGHTS[p.main];

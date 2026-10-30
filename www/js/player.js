@@ -92,7 +92,7 @@ export function genPlayer(rng, o) {
   const p = {
     id: o.id, fn, ln, nat: o.nat, birth: o.birth, birthplace: o.birthplace || "",
     club: o.club, squad: o.squad || "A", main: pos, positions, foot, wf, height, weight,
-    a, ca: 0, pa: o.pa, hid, cond: 100, sharp: 60, morale: 65, injury: null, ban: 0,
+    a, ca: 0, pa: o.pa, hid, cond: 100, sharp: 60, morale: 65, injury: null, bans: {}, ycs: {},
     contract: null, form: [], st: newStats(), caps: 0, intGoals: 0, retired: false,
   };
   refreshCA(p);

@@ -1,5 +1,5 @@
 // App shell: top bar, drawer, router, processing overlay.
-import { $, $$, esc, crest, applyTheme, toast, avatar, lookFor, compBadge } from "./core.js";
+import { $, $$, esc, crest, applyTheme, toast, avatar, lookFor, compBadge, setCurrency } from "./core.js";
 import { fmt, ymd, HARI, BULAN } from "../calendar.js";
 import { userP, userClub } from "../world.js";
 import { continueGame } from "../sim.js";
@@ -18,20 +18,28 @@ const ICON = {
   latihan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h3M18 12h3M6 8v8M18 8v8M9 10v4M15 10v4M9 12h6"/></svg>',
   klub: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/></svg>',
   kompetisi: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 4h10v4a5 5 0 0 1-10 0zM5 5H3v2a3 3 0 0 0 3 3M19 5h2v2a3 3 0 0 1-3 3M12 13v4M8 21h8"/></svg>',
+  pengaturan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
   karier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
 };
 export { ICON };
 
 export const SECTIONS = {
   portal: { label: "Portal", tabs: [["ringkasan", "Ringkasan"], ["pesan", "Pesan"], ["kalender", "Kalender"], ["berita", "Berita"], ["kompetisi", "Kompetisi"]] },
-  pemain: { label: "Pemain", tabs: [["ringkasan", "Ringkasan"], ["performa", "Performa"], ["karier", "Karier"]] },
+  pemain: { label: "Pemain", tabs: [["ringkasan", "Ringkasan"], ["pribadi", "Pribadi"], ["kontrak", "Kontrak"], ["performa", "Performa"], ["karier", "Karier"], ["bandingkan", "Bandingkan"]] },
   skuad: { label: "Skuad", tabs: [["utama", "Tim Utama"], ["muda", "Akademi U-19"]] },
-  latihan: { label: "Latihan", tabs: [["individu", "Latihan Individu"], ["kalender", "Kalender Latihan"], ["medis", "Pusat Medis"]] },
+  latihan: { label: "Latihan", tabs: [["sesi", "Sesi Latihan"], ["individu", "Latihan Individu"], ["kalender", "Kalender Latihan"], ["medis", "Pusat Medis"]] },
   klub: { label: "Klub", tabs: [["ringkasan", "Ringkasan"], ["staf", "Staf"], ["sejarah", "Sejarah"]] },
   kompetisi: { label: "Kompetisi", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["statistik", "Statistik"], ["sejarah", "Sejarah"]], compTabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["tahap", "Tahap"], ["sejarah", "Sejarah"]] },
   laga: { label: "Laga", tabs: [] },
+  pengaturan: { label: "Pengaturan", tabs: [["umum", "Umum"]] },
 };
-const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"]];
+const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"], ["pengaturan", "Pengaturan"]];
+export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal" };
+export function applySettings(G) {
+  G.settings = { ...DEFAULT_SETTINGS, ...(G.settings || {}) };
+  setCurrency(G.settings.currency);
+  document.body.style.zoom = G.settings.textScale;
+}
 
 export const save = () => S.G && saveGame(S.G);
 export function register(sec, tab, fn) { S.screens[sec + "/" + tab] = fn; }
@@ -84,12 +92,15 @@ function nextMatchText(G) {
 export function goLabel(G) {
   if (G.user.retired) return "Pensiun";
   if (G.pending) return "Ke Laga";
-  if (G.inbox.some(m => m.kind === "decision" && !m.done)) return "Pesan";
+  const dec = G.inbox.filter(m => m.kind === "decision" && !m.done).length;
+  if (dec) return `Pesan <span class="badge" style="background:#fff;color:#7b2fd6">${dec}</span>`;
+  if (G.trainingDue) return "Latihan";
   return "Lanjutkan";
 }
 
 export function render(opt = {}) {
   const G = S.G; if (!G) return;
+  applySettings(G);
   const restore = snapScroll(!!opt.fresh);
   const u = userP(G), club = userClub(G);
   applyTheme(club.colors);
@@ -100,22 +111,28 @@ export function render(opt = {}) {
   if (S.sec === "klub") secLabel = (G.clubs[S.p.club] || club).short;
   if (S.sec === "kompetisi") secLabel = S.p.comp ? (S.p.comp === "NL" ? "UNL" : G.comps[S.p.comp]?.short || "Kompetisi") : G.leagues[S.p.league || club.league]?.short || "Kompetisi";
   const tabs = S.sec === "kompetisi" && S.p.comp ? sec.compTabs : sec.tabs;
+  // notification counts: unread mail, open decisions, unseen news about you
+  const unread = G.inbox.filter(m => !m.read).length;
+  const news = G.news.filter(n => n.id > (G.newsSeen || 0) && n.scope === "me").length;
+  const B = n => (n ? `<span class="badge">${n > 99 ? "99+" : n}</span>` : "");
+  const tabBadge = k => (S.sec === "portal" ? (k === "pesan" ? B(unread) : k === "berita" ? B(news) : "") : "");
+  const navBadge = k => (k === "portal" ? B(unread + news) : "");
   const app = $("#app");
   app.innerHTML = `
   <header class="topbar">
     <div class="tb1">
-      <button class="ibtn" id="menu" aria-label="Menu">${ICON.menu}</button>
+      <button class="ibtn" id="menu" aria-label="Menu${unread ? `, ${unread} pesan belum dibaca` : ""}">${ICON.menu}${unread + news ? `<span class="dot">${unread + news > 9 ? "9+" : unread + news}</span>` : ""}</button>
       ${crest(club, 32)}
       <div class="datebox"><div class="d"><b>${HARI[wd].slice(0, 3).toUpperCase()} ${d}/${m}/${y}</b><span>${esc(nextMatchText(G))}</span></div></div>
       <button class="gobtn" id="go" ${G.user.retired ? "disabled" : ""}>${goLabel(G)} ${ICON.go}</button>
     </div>
-    ${tabs.length ? `<div class="tb2"><div class="sec">${esc(secLabel)}</div><div class="subtabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${l}</button>`).join("")}</div></div>` : ""}
+    ${tabs.length ? `<div class="tb2"><div class="sec">${esc(secLabel)}</div><div class="subtabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${l}${tabBadge(k)}</button>`).join("")}</div></div>` : ""}
   </header>
   <main class="page" id="page"></main>
   <div class="scrim" id="scrim" ${S.drawer ? "" : "hidden"}></div>
   <aside class="drawer ${S.drawer ? "open" : ""}" id="drawer" aria-label="Menu utama">
     <div class="dh">${avatar(lookFor(u), club.colors, 48, 18)}<div><b>${esc(fullName(u))}</b><span>${esc(club.name)}</span></div></div>
-    <nav>${DRAWER.map(([k, l]) => `<button data-nav="${k}" ${S.sec === k ? 'aria-current="page"' : ""}>${ICON[k]}${l}</button>`).join("")}</nav>
+    <nav>${DRAWER.map(([k, l]) => `<button data-nav="${k}" ${S.sec === k ? 'aria-current="page"' : ""}>${ICON[k]}${l}${navBadge(k)}</button>`).join("")}</nav>
     <div class="dfoot"><button class="btn sm" data-act="menu-utama">Menu utama</button>${!G.user.retired ? '<button class="btn sm" data-act="retire">Pensiun…</button>' : ""}</div>
   </aside>`;
   const page = $("#page");
@@ -150,6 +167,7 @@ document.addEventListener("click", e => {
 export function onGo() {
   const G = S.G;
   if (G.pending) { go("laga", "pra"); return; }
+  if (G.trainingDue) { go("latihan", "sesi"); return; }
   const dec = G.inbox.find(m => m.kind === "decision" && !m.done);
   if (dec) { go("portal", "pesan", { mail: dec.id }); return; }
   processing();
@@ -174,6 +192,7 @@ function processing() {
       setTimeout(() => {
         el.remove();
         if (r === "match") go("laga", "pra");
+        else if (r === "training") go("latihan", "sesi");
         else if (r === "decision") go("portal", "pesan", { mail: G.inbox.find(m => m.kind === "decision" && !m.done)?.id });
         else if (r === "mail") go("portal", "pesan", { mail: G.inbox[0]?.id });
         else if (r === "retired") go("pemain", "karier", {});

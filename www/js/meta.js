@@ -176,6 +176,7 @@ export function clubMatchDays(G, clubId, youth = false) {
   const out = new Map();
   const put = (f, comp, compName, src) => out.set(f.d, { opp: f.h === clubId ? f.a : f.h, ha: f.neutral ? "N" : f.h === clubId ? "K" : "T", comp, compName, res: f.res ? (f.h === clubId ? f.res : [f.res[1], f.res[0]]) : null, f, src });
   if (L && !youth) for (const f of L.fixtures) if (f.h === clubId || f.a === clubId) put(f, L.short, L.name, L.id);
+  if (G.friendly && G.friendly.club === clubId) for (const f of G.friendly.fixtures) if (!!f.youth === youth) put(f, "PS", youth ? "Laga Persahabatan U-19" : "Laga Persahabatan", "friendly");
   for (const cp of Object.values(G.comps || {})) {
     if (!!cp.youth !== youth) continue;
     for (const f of cp.fixtures) if (f.h === clubId || f.a === clubId) {

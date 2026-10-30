@@ -6,7 +6,7 @@ function unpackAttrs(s) { const a = new Array(s.length); for (let i = 0; i < s.l
 
 // Players are stored as arrays in a fixed key order (about a third of the size of plain JSON);
 // keys outside the list go into a trailing object.
-const PK = ["id", "fn", "ln", "nat", "birth", "birthplace", "club", "squad", "main", "positions", "foot", "wf", "height", "weight", "a", "ca", "pa", "hid", "cond", "sharp", "morale", "injury", "ban", "contract", "form", "st", "caps", "intGoals", "retired", "ycCount", "mins", "no", "noClub"];
+const PK = ["id", "fn", "ln", "nat", "birth", "birthplace", "club", "squad", "main", "positions", "foot", "wf", "height", "weight", "a", "ca", "pa", "hid", "cond", "sharp", "morale", "injury", "ban", "contract", "form", "st", "caps", "intGoals", "retired", "ycs", "bans", "mins", "no", "noClub"];
 const HID = ["con", "imp", "inj", "pro", "amb", "pre", "tem", "adp", "loy", "spo"];
 const ST = ["apps", "sub", "min", "gls", "ast", "rsum", "rn", "motm", "yc", "rc", "cs", "pom"];
 const PKS = new Set(PK);

@@ -4,17 +4,18 @@ import { NATIONS } from "./data.js";
 import { A } from "./attributes.js";
 import { fullName, shortName, newStats, fairWage } from "./player.js";
 import { simulateMatch } from "./match.js";
-import { ymd, ageOn, seasonOf, seasonLabel, fmt, day } from "./calendar.js";
+import { ymd, ageOn, seasonOf, seasonLabel, fmt, day, nextWeekday } from "./calendar.js";
 import {
   userP, userClub, pickTeam, quickSim, applyLine, developPlayer, makeFixtures, addMail, addNews, table,
-  genSenior, genYouth, fifaU18Allowed, leagueNation, inIntlWindow, clubNatOK, createWorld, START, fillSquad, leagueSeasonLabel,
+  genSenior, genYouth, fifaU18Allowed, leagueNation, inIntlWindow, clubNatOK, createWorld, START, fillSquad, leagueSeasonLabel, banned, banTotal,
 } from "./world.js";
 import { setupSeasonComps, setupYearComps, compsAfterDay, afterTieFixture, cupWeekends, promotions, finishLeague, compLabel, CONT_IDS } from "./comps.js";
 import {
   weeklyCareer, monthlyCareer, monthlyReport, playShare, seasonAwards, userSeasonEnd, endLoan, userContractExpiry,
-  squadStatus, selectNational, nationalLineup, ntFor, decision,
+  squadStatus, selectNational, nationalLineup, ntFor, decision, trainingSessionsToday, doTraining, W, F,
 } from "./career.js";
 import { intlDay, campMatchToday, afterIntlMatch, setupNL } from "./intl.js";
+import { payWeek, payMatchBonus, weeklyResidency, checkPromise } from "./contract.js";
 import { staffOf } from "./meta.js";
 const staffOfLite = (G, cid) => (G.clubs[cid] ? staffOf(G, cid)[0].name : "");
 
@@ -32,9 +33,36 @@ export function newCareer(f) {
   setupYearComps(G, rng, 2026);
   setupNL(G);
   catchUp(G, rng, day(2026, 1, 1), START - 1);
+  setupFriendlies(G, rng);
   seasonPreviews(G, rng);
   G.rs = rng.s;
   return G;
+}
+// Pre-season friendlies for the user's club (senior side and U-19), July–August.
+export function setupFriendlies(G, rng) {
+  const u = userP(G), club = userClub(G);
+  G.friendly = null;
+  const L = club && G.leagues[club.league];
+  if (!L || L.cal !== "aug") return;
+  const first = Math.min(...L.fixtures.map(f => f.d));
+  const cands = Object.values(G.clubs).filter(c => c.id !== club.id && (G.leagues[c.league] || c.ext) && Math.abs(c.level - club.level) < 22);
+  const ycands = cands.filter(c => c.youthSquad.length >= 11);
+  const fixtures = [];
+  let d = nextWeekday(G.date + 8, 6), n = 0;
+  while (d < first - 4 && n < 5) {
+    const opp = rng.pick(cands), home = rng.chance(0.5);
+    fixtures.push({ id: `FR-${G.season}-${n}`, d: d - (n % 2 ? 3 : 0), h: home ? club.id : opp.id, a: home ? opp.id : club.id, res: null });
+    const yo = rng.pick(ycands);
+    if (yo) fixtures.push({ id: `FRY-${G.season}-${n}`, d: d + 1, h: club.id, a: yo.id, res: null, youth: true });
+    d += 7; n++;
+  }
+  G.friendly = { club: club.id, season: G.season, fixtures, name: "Laga Persahabatan" };
+}
+function playFriendly(G, rng, f, H, Aw, res) {
+  res = res || quickSim(rng, H, Aw);
+  f.res = res.score.slice();
+  for (const [id, line] of Object.entries(res.players)) { const p = G.players[id]; if (p) applyLine(G, rng, p, line, "friendly", p.isUser); }
+  return res;
 }
 // Calendar-year competitions already under way on 1 July 2026: play their first half quickly.
 function catchUp(G, rng, from, to) {
@@ -46,7 +74,7 @@ function catchUp(G, rng, from, to) {
     compsAfterDay(G, rng);
   }
   G.date = keep;
-  for (const p of Object.values(G.players)) { p.injury = null; p.ban = 0; p.cond = 100; p.form = p.form.slice(-3); }
+  for (const p of Object.values(G.players)) { p.injury = null; p.bans = {}; p.ycs = {}; p.cond = 100; p.form = p.form.slice(-3); }
 }
 export function rngOf(G) { const r = new RNG(1); r.s = G.rs; return r; }
 const ids = t => ({ club: t.club, name: t.name, formation: t.formation, xi: t.xi.map(p => p.id), bench: t.bench.map(p => p.id) });
@@ -54,6 +82,7 @@ const fromIds = (G, t) => ({ ...t, xi: t.xi.map(id => G.players[id]).filter(Bool
 
 export function continueGame(G, maxDays = 45) {
   const rng = rngOf(G);
+  if (G.trainingDue) { G.rs = rng.s; return "training"; }
   const mailBefore = G.mailId || 0;
   let stop = null;
   for (let i = 0; i < maxDays && !stop; i++) {
@@ -61,6 +90,12 @@ export function continueGame(G, maxDays = 45) {
     if (G.pending) { stop = "match"; break; }
     if (G.inbox.some(m => m.kind === "decision" && !m.done)) { stop = "decision"; break; }
     if (G.processed !== G.date) {
+      // training comes first in the day: stop so the player can take part (or train automatically)
+      if (G.user.trainDone !== G.date && trainingSessionsToday(G)) {
+        const stopHere = (G.settings?.trainStop ?? true) && !(G.user.autoTrainUntil >= G.date);
+        if (stopHere) { G.trainingDue = true; stop = "training"; break; }
+        doTraining(G, rng, (G.user.autoTrainUntil >= G.date && G.user.autoEffort) || G.settings?.autoEffort || "Normal", false, true);
+      }
       processDay(G, rng);
       G.processed = G.date;
       if (G.pending) { stop = "match"; break; }
@@ -96,8 +131,9 @@ function processDay(G, rng) {
     const { src, f } = userFix;
     const youth = !!f.youth;
     const prospect = !youth && ageOn(u.birth, G.date) <= 21 && u.squad === "A" && rng.chance(0.35 + (u.favour ? 0.3 : 0)) ? u : null;
-    const H = pickTeam(G, f.h, rng, { youth, prospect: f.h === uc ? prospect : null });
-    const Aw = pickTeam(G, f.a, rng, { youth, prospect: f.a === uc ? prospect : null });
+    const key = youth ? (src.kind ? src.id : "u19") : statKey(src);
+    const H = pickTeam(G, f.h, rng, { youth, comp: key, prospect: f.h === uc ? prospect : null });
+    const Aw = pickTeam(G, f.a, rng, { youth, comp: key, prospect: f.a === uc ? prospect : null });
     const mine = f.h === uc ? H : Aw;
     const role = mine.xi.some(p => p.id === u.id) ? "XI" : mine.bench.some(p => p.id === u.id) ? "Cadangan" : null;
     const isLeague = !!G.leagues[src.id] && src.fixtures === G.leagues[src.id].fixtures;
@@ -110,11 +146,24 @@ function processDay(G, rng) {
     playFixture(G, rng, src, f, true, H, Aw);
     if (!youth) {
       trackMinutes(G, 0);
-      if (u.squad === "A" && !u.injury && !u.away && !(u.ban > 0)) G.user.notPicked = (G.user.notPicked || 0) + 1;
+      if (u.squad === "A" && !u.injury && !u.away && !banned(u, key)) G.user.notPicked = (G.user.notPicked || 0) + 1;
     }
   }
+  // pre-season friendlies of the user's club
+  if (!G.pending && !userFix && G.friendly && G.friendly.club === uc) {
+    for (const f of G.friendly.fixtures) {
+      if (f.d !== G.date || f.res) continue;
+      const youth = !!f.youth;
+      const H = pickTeam(G, f.h, rng, { youth, comp: "friendly" }), Aw = pickTeam(G, f.a, rng, { youth, comp: "friendly" });
+      const mine = f.h === uc ? H : Aw;
+      const role = mine.xi.some(p => p.id === u.id) ? "XI" : mine.bench.some(p => p.id === u.id) ? "Cadangan" : null;
+      if (role && !u.away && !u.injury && !G.pending) { G.pending = { kind: "friendly", fid: f.id, home: ids(H), away: ids(Aw), role, comp: youth ? "Laga Persahabatan U-19" : "Laga Persahabatan", youth }; break; }
+      playFriendly(G, rng, f, H, Aw);
+    }
+  }
+  const youthFriendly = G.friendly?.fixtures.some(f => f.d === G.date && f.youth);
   // U-19 match on Saturdays for academy players (when there is no youth competition game)
-  if (!G.pending && !userFix && u.squad === "Y" && !u.injury && !u.away && !(u.ban > 0) && isYouthDay(G.date) && G.leagues[ul]) {
+  if (!G.pending && !userFix && !youthFriendly && u.squad === "Y" && !u.injury && !u.away && isYouthDay(G.date) && G.leagues[ul]) {
     const club = userClub(G);
     const opp = rng.pick(G.leagues[club.league].teams.filter(id => id !== club.id && G.clubs[id].youthSquad.length >= 11));
     if (opp) {
@@ -143,8 +192,9 @@ function isYouthDay(n) {
 // src: a league (G.leagues[x]) or a competition (G.comps[x])
 const statKey = src => (src.kind ? (src.kind === "po" ? "liga" : src.id) : "liga");
 function playFixture(G, rng, src, f, full, H, Aw) {
-  H = H || pickTeam(G, f.h, rng, { youth: !!f.youth });
-  Aw = Aw || pickTeam(G, f.a, rng, { youth: !!f.youth });
+  const k0 = f.youth ? null : statKey(src);
+  H = H || pickTeam(G, f.h, rng, { youth: !!f.youth, comp: k0 });
+  Aw = Aw || pickTeam(G, f.a, rng, { youth: !!f.youth, comp: k0 });
   const res = full && !f.youth ? simulateMatch(rng, H, Aw) : quickSim(rng, H, Aw);
   applyFixture(G, rng, src, f, H, Aw, res);
   return res;
@@ -161,7 +211,7 @@ function applyFixture(G, rng, src, f, H, Aw, res) {
     applyLine(G, rng, p, line, key, p?.isUser);
     if (p && +id === res.pom && key === "liga") p.st.pom++;
   }
-  if (!f.youth) for (const t of [H, Aw]) for (const pid of G.clubs[t.club]?.squad || []) { const p = G.players[pid]; if (p && p.ban > 0 && !res.players[pid]) p.ban--; }
+  if (!f.youth) for (const t of [H, Aw]) for (const pid of G.clubs[t.club]?.squad || []) { const p = G.players[pid]; if (p && p.bans?.[key] > 0 && !res.players[pid]) p.bans[key]--; }
   if (src.kind && f.tie != null) afterTieFixture(G, rng, src, f);
 }
 const full_ = res => !res.quick;
@@ -201,16 +251,24 @@ export function playPending(G, record) {
   const pd = G.pending; if (!pd) return null;
   const u = userP(G);
   const { H, A: Aw } = pendingTeams(G);
-  // the user's own slot: make sure they're used if selected
+  // the player's mindset from the team talk nudges his attributes for this match only
+  const MIND = { Termotivasi: { wor: 1.5, agg: 1.5, sta: 0.5 }, Fokus: { cmp: 1.5, dec: 1, cnt: 1 }, Santai: { fla: 1.5, vis: 0.5, cmp: 0.5 } }[pd.mind];
+  const keep = u.a.slice();
+  if (MIND) for (const [k, v] of Object.entries(MIND)) u.a[A[k]] = Math.min(20, u.a[A[k]] + v);
   const res = simulateMatch(rng, H, Aw, { record: true });
+  u.a = keep;
   let comp = pd.comp, fx = null, src = null;
   if (pd.kind === "liga" || pd.kind === "comp") {
     src = pd.kind === "liga" ? G.leagues[pd.league] : G.comps[pd.cid];
     fx = src.fixtures.find(x => x.id === pd.fid);
     applyFixture(G, rng, src, fx, H, Aw, res);
+    if (!pd.youth) { const ln = res.players[u.id]; const mineSide = H.club === u.club ? 0 : 1; if (ln || pd.role === "Cadangan") payMatchBonus(G, ln, res.score[1 - mineSide] === 0); }
     if (!pd.youth) trackMinutes(G, res.players[u.id]?.min || 0);
     else trackMinutes(G, res.players[u.id]?.min || 0);
     // other games of the day were already played
+  } else if (pd.kind === "friendly") {
+    fx = G.friendly.fixtures.find(x => x.id === pd.fid);
+    playFriendly(G, rng, fx, H, Aw, res);
   } else {
     const line = res.players[u.id];
     if (line) {
@@ -236,6 +294,7 @@ export function playPending(G, record) {
     ...matchCharts(res),
     lineups: res.lineups.map((l, side) => ({ formation: l.formation, start: l.start.map(s => ({ ...s, name: nameOf(s.id), no: numOf(G, s.id, [H, Aw][side]) })) })),
     venue: pd.kind === "timnas" ? "" : pd.kind === "u19" || pd.youth ? "Lapangan Akademi" : pd.neutral ? "Stadion netral" : `Kandang ${H.name}`,
+    pre: pd.kind === "friendly",
     homeShort: shortOfTeam(G, H), awayShort: shortOfTeam(G, Aw),
     benches: [H, Aw].map(t => t.bench.map(p => ({ id: p.id, name: shortName(p), no: numOf(G, p.id, t), pos: p.main }))),
     managers: [H, Aw].map(t => managerOf(G, t)),
@@ -410,17 +469,20 @@ function nextDay(G, rng) {
 function weekly(G, rng) {
   const u = userP(G);
   if (!G.user.retired) {
-    developPlayer(G, rng, u, 1, playShare(G));
-    // training injuries
+    developPlayer(G, rng, u, 1, playShare(G), 1 + clamp(G.user.trainBoost || 0, -0.25, 0.35));
+    const trained = G.user.trainedWeek || 0;
+    G.user.trainBoost = 0; G.user.trainedWeek = 0;
+    // training injuries (only when the daily sessions were not played out)
     const inten = { Rendah: 0.6, Normal: 1, Tinggi: 1.6 }[G.user.training.intensity] || 1;
-    if (!u.injury && rng.chance(0.006 * inten * (0.6 + u.hid.inj / 20) * (G.user.difficulty === "Keras" ? 1.3 : 1))) {
+    if (!trained && !u.injury && rng.chance(0.006 * inten * (0.6 + u.hid.inj / 20) * (G.user.difficulty === "Keras" ? 1.3 : 1))) {
       const days = rng.int(3, 18);
       u.injury = { name: "Cedera ringan saat latihan", days, total: days };
       addMail(G, "Cedera di latihan", `Kamu cedera ringan saat latihan dan absen sekitar ${days} hari.`, "bad", { cat: "Cedera" });
       G.user.injuries.push({ date: G.date, name: u.injury.name, days });
     }
     if (G.user.training.intensity === "Tinggi") u.cond = Math.max(60, u.cond - 4);
-    trainingRating(G, rng);
+    if (!trained) trainingRating(G, rng);
+    payWeek(G); weeklyResidency(G);
     weeklyCareer(G, rng);
   }
   const { m } = ymd(G.date);
@@ -434,7 +496,7 @@ function monthly(G, rng) {
     developPlayer(G, rng, p, 4.35, p.squad === "Y" ? 0.6 : share);
     p.mins = 0;
   }
-  if (!G.user.retired) { monthlyReport(G); monthlyCareer(G, rng); }
+  if (!G.user.retired) { monthlyReport(G); monthlyCareer(G, rng); checkPromise(G); }
 }
 
 // ---------- AI transfers ----------
@@ -498,7 +560,9 @@ function forceFinishComp(G, rng, c) {
 function endSeason(G, rng) {
   for (const L of Object.values(G.leagues)) if (L.cal === "aug" && L.state !== "done") forceFinish(G, rng, L);
   const awards = seasonAwards(G);
+  const lgBefore = userClub(G).league, tierBefore = G.leagues[lgBefore]?.tier || 3;
   promotions(G, rng, (a, b) => quickWinner(G, rng, a, b));
+  contractAfterPromotion(G, tierBefore);
   const u = userP(G);
   if (!G.user.retired) userSeasonEnd(G, awards);
   if (G.user.loan) endLoan(G);
@@ -547,6 +611,21 @@ function endSeason(G, rng) {
   }
 }
 
+// relegation/promotion clauses in the user's contract
+function contractAfterPromotion(G, tierBefore) {
+  const u = userP(G), c = u.contract; if (!c || c.youth || G.user.retired) return;
+  const tierNow = G.leagues[userClub(G).league]?.tier || 3;
+  if (tierNow > tierBefore) {
+    if (c.relegCut) { c.wage = Math.round(c.wage * (1 - c.relegCut / 100) / 50) * 50; addMail(G, "Gaji turun karena degradasi", `Sesuai klausul kontrak, gajimu turun ${c.relegCut}% menjadi ${W(c.wage)}/pekan.`, "bad", { cat: "Kontrak" }); }
+    if (c.relegRelease) decision(G, "Klausul pelepasan degradasi", "Klubmu terdegradasi. Kontrakmu punya klausul yang membolehkanmu pergi secara gratis.", [
+      { label: "Aktifkan klausul", detail: "Cari klub baru sebagai pemain bebas.", act: "relegRelease" },
+      { label: "Bertahan", detail: "Bantu klub kembali naik.", act: "none" },
+    ], "transfer");
+  } else if (tierNow < tierBefore && c.promoRaise) {
+    c.wage = Math.round(c.wage * (1 + c.promoRaise / 100) / 50) * 50;
+    addMail(G, "Gaji naik karena promosi", `Sesuai klausul kontrak, gajimu naik ${c.promoRaise}% menjadi ${W(c.wage)}/pekan.`, "good", { cat: "Kontrak" });
+  }
+}
 // external clubs (continental opponents) are not simulated week to week: refresh ages and quality yearly
 function refreshExternal(G, rng, club) {
   for (const pid of [...club.squad]) {
@@ -567,7 +646,7 @@ function escapePyramid(G, rng) {
   if (!picks.length) return;
   decision(G, "Klubmu turun kasta", `${old.name} turun ke divisi yang tidak dimainkan di gim ini. Beberapa klub siap merekrutmu secara gratis:`, picks.map(c => {
     const wage = Math.round(fairWage(p, c.league) * rng.float(0.95, 1.15) / 50) * 50;
-    return { label: c.name, detail: `${G.leagues[c.league].name} · 3 tahun · €${wage.toLocaleString("id-ID")}/pekan`, act: "freeAgent", data: { to: c.id, wage, years: 3 } };
+    return { label: c.name, detail: `${G.leagues[c.league].name} · 3 tahun · ${W(wage)}/pekan`, act: "freeAgent", data: { to: c.id, wage, years: 3 } };
   }), "transfer");
 }
 function newSeason(G, rng) {
@@ -579,9 +658,15 @@ function newSeason(G, rng) {
   const arg = Object.values(G.leagues).filter(L => L.cal === "half");
   for (const L of arg) { if (L.state !== "done") forceFinish(G, rng, L); makeFixtures(G, rng, L, G.season, "Clausura"); }
   setupSeasonComps(G, rng, G.season);
-  for (const p of Object.values(G.players)) p.ban = Math.min(p.ban || 0, 1);
+  // a new season wipes cup/continental yellow cards; a carried-over league ban stays (max one game)
+  for (const p of Object.values(G.players)) { if (p.ycs) p.ycs = { liga: p.ycs.liga || 0 }; if (p.bans) p.bans = { liga: Math.min(p.bans.liga || 0, 1) }; }
   G.user.renewOffered = false;
   for (const c of Object.values(G.clubs)) c.injCount = 0;
+  // annual raise clause, new season's earnings
+  const uc = userP(G).contract;
+  if (uc && uc.raise && !uc.youth && uc.start && G.date - uc.start > 300) { uc.wage = Math.round(uc.wage * (1 + uc.raise / 100) / 50) * 50; addMail(G, "Kenaikan gaji tahunan", `Gajimu naik ${uc.raise}% menjadi ${W(uc.wage)}/pekan sesuai kontrak.`, "good", { cat: "Kontrak" }); }
+  if (G.user.money) G.user.money.season = 0, G.user.money.bonus = 0;
+  setupFriendlies(G, rng);
   seasonPreviews(G, rng, [...aug, ...arg]);
   const L = G.leagues[userClub(G).league];
   addMail(G, `Musim ${seasonLabel(G.season)} dimulai`, `${L ? `Jadwal ${L.name} ${leagueSeasonLabel(L)} sudah keluar.` : ""} Statusmu di skuad: ${squadStatus(G)}.`, "info");

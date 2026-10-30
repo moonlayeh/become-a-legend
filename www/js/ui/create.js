@@ -6,7 +6,7 @@ import { ID_REGIONS } from "../regions.js";
 import { ATTRS, A } from "../attributes.js";
 import { day, ymd, ageOn, fmt, BULAN_PANJANG } from "../calendar.js";
 import { RNG } from "../rng.js";
-import { STYLES, TRAITS, LANGS, buildUser, fifaU18Allowed, CITY, userP, userClub, VERSION } from "../world.js";
+import { STYLES, TRAITS, LANGS, buildUser, fifaU18Allowed, CITY, userP, userClub, VERSION, POTENTIAL } from "../world.js";
 import { newCareer } from "../sim.js";
 import { saveGame, loadGame, deleteSave } from "../save.js";
 import { personality, fullName } from "../player.js";
@@ -58,7 +58,7 @@ const ABOUT = `<div class="card" style="margin-top:14px;font-size:13.5px;line-he
 
 // ---------- wizard ----------
 function startWizard() {
-  W = { fn: "", ln: "", nick: "", birth: "2010-02-06", birthplace: "", bcountry: "IDN", bprov: "", nat: "IDN", nat2: "", langs: ["Indonesia"], look: { skin: 2, hair: 2, hc: 0, beard: 0 }, height: 176, pos: "ST", secondary: [], foot: "Kanan", wf: "Sedang", styles: [], traits: [], club: "acak", league: "IDN1", difficulty: "Normal", sub: 0 };
+  W = { fn: "", ln: "", nick: "", birth: "2010-02-06", birthplace: "", bcountry: "IDN", bprov: "", nat: "IDN", nat2: "", langs: ["Indonesia"], look: { skin: 2, hair: 2, hc: 0, beard: 0 }, height: 176, pos: "ST", secondary: [], foot: "Kanan", wf: "Sedang", styles: [], traits: [], club: "acak", league: "IDN1", difficulty: "Normal", potential: "Berbakat", sub: 0 };
   step = 0; paint(true);
 }
 function ageNow() { return ageOn(fromIso(W.birth), START); }
@@ -98,7 +98,7 @@ function next() {
   if (step === 0) {
     W.fn = $("#fn").value.trim(); W.ln = $("#ln").value.trim();
     if (!W.fn || !W.ln) { toast("Isi nama depan dan nama belakang."); return; }
-    const a = ageNow(); if (a < 15 || a > 18) { toast("Usia pada 1 Juli 2026 harus 15–18 tahun."); return; }
+    const a = ageNow(); if (a < 15 || a > 35) { toast("Usia pada 1 Juli 2026 harus 15–35 tahun."); return; }
   }
   if (step === 5 && W.club !== "acak") {
     const c = CLUBS.find(c => c.id === W.club);
@@ -116,9 +116,9 @@ function stepBio() {
   <h2>Saya ingin dikenal sebagai…</h2><p class="help">Nama ini dipakai sepanjang kariermu.</p>
   <label class="fld"><span>Nama depan</span><input id="fn" value="${esc(W.fn)}" maxlength="20" autocomplete="off"></label>
   <label class="fld"><span>Nama belakang</span><input id="ln" value="${esc(W.ln)}" maxlength="24" autocomplete="off"></label>
-  <h2 style="margin-top:14px">Saya lahir pada…</h2><p class="help">Ini menentukan usiamu. Kamu bisa mulai di usia 15–17 (atau 18).</p>
-  <label class="fld"><span>Tanggal lahir</span><input id="dob" type="date" value="${W.birth}" min="2007-07-02" max="2011-07-01"></label>
-  <div class="muted" style="font-size:13.5px;margin:-6px 0 12px">Usia saat musim dimulai: <b style="color:#fff" id="agev">${a} tahun</b></div>
+  <h2 style="margin-top:14px">Saya lahir pada…</h2><p class="help">Bebas, usia 15–35 tahun. Sampai usia 18 kamu mulai dari akademi U-19; usia 19 ke atas langsung di skuad senior.</p>
+  <label class="fld"><span>Tanggal lahir</span><input id="dob" type="date" value="${W.birth}" min="1991-07-02" max="2011-07-01"></label>
+  <div class="muted" style="font-size:13.5px;margin:-6px 0 12px">Usia saat musim dimulai: <b style="color:#fff" id="agev">${a} tahun</b> · ${a <= 18 ? "mulai di akademi U-19" : "mulai di skuad senior"}</div>
   <h2 style="margin-top:14px">Saya adalah…</h2>
   <label class="fld"><span>Kewarganegaraan</span><select id="nat">${nats.map(([k, n]) => `<option value="${k}" ${k === W.nat ? "selected" : ""}>${flagEmoji(k)} ${esc(n.name)}</option>`).join("")}</select></label>
   ${W.nat2 !== "" || W.showNat2 ? `<label class="fld"><span>Kewarganegaraan kedua</span><select id="nat2"><option value="">Tidak ada</option>${Object.entries(NATIONS).sort((a, b) => a[1].name.localeCompare(b[1].name)).filter(([k]) => k !== W.nat).map(([k, n]) => `<option value="${k}" ${k === W.nat2 ? "selected" : ""}>${flagEmoji(k)} ${esc(n.name)}</option>`).join("")}</select></label><p class="help" style="margin-top:-6px">Bisa membuka jalur timnas kedua (pindah federasi diatur aturan FIFA) dan memudahkan transfer ke negara itu sebelum usia 18.</p>` : `<button class="addrow" id="addnat"><b>+</b>Pilih kewarganegaraan kedua</button>`}
@@ -253,11 +253,16 @@ function stepSummary() {
     <div><div class="k">Akademi</div><div class="v">${sel ? esc(sel.name) : "Acak"}</div></div><div><div class="k">Tinggi</div><div class="v">${W.height} cm</div></div>
   </div></div>
   <div class="muted" style="font-size:13px;margin:-4px 0 12px">Lahir di ${esc(W.birthplace ? (W.birthplace.startsWith("Kota ") ? W.birthplace : W.bcountry === "IDN" ? "Kab. " + W.birthplace : W.birthplace) : "-")}${W.bprov ? `, ${esc(W.bprov)}` : ""}</div>
+  <h2>Potensi</h2><p class="help">Tidak harus wonderkid. Potensi menentukan batas tertinggi kemampuanmu.</p>
+  ${Object.entries(POTENTIAL).map(([k, v]) => `<button class="pick" data-pot="${k}" aria-pressed="${W.potential === k}"><span class="bx"></span><span><b>${esc(v.label)}</b><span>${esc(v.desc)}</span></span></button>`).join("")}
   <h2>Kesulitan</h2>
-  <button class="pick" data-df="Normal" aria-pressed="${W.difficulty === "Normal"}"><span class="bx"></span><span><b>Normal</b><span>Potensi tinggi, dunia realistis tapi ramah.</span></span></button>
-  <button class="pick" data-df="Keras" aria-pressed="${W.difficulty === "Keras"}"><span class="bx"></span><span><b>Keras</b><span>Potensi diacak dan bisa rendah, cedera lebih sering, klub lebih kejam.</span></span></button>`;
+  <button class="pick" data-df="Normal" aria-pressed="${W.difficulty === "Normal"}"><span class="bx"></span><span><b>Normal</b><span>Dunia realistis tapi ramah.</span></span></button>
+  <button class="pick" data-df="Keras" aria-pressed="${W.difficulty === "Keras"}"><span class="bx"></span><span><b>Keras</b><span>Cedera lebih sering, perkembangan lebih fluktuatif, klub lebih kejam.</span></span></button>`;
 }
-bind[6] = () => $$("[data-df]").forEach(b => (b.onclick = () => { W.difficulty = b.dataset.df; paint(); }));
+bind[6] = () => {
+  $$("[data-df]").forEach(b => (b.onclick = () => { W.difficulty = b.dataset.df; paint(); }));
+  $$("[data-pot]").forEach(b => (b.onclick = () => { W.potential = b.dataset.pot; paint(); }));
+};
 
 function finish() {
   const ld = document.createElement("div"); ld.className = "loading"; ld.innerHTML = '<div><div class="spin"></div>Membangun dunia sepak bola…</div>'; document.body.appendChild(ld);
@@ -275,7 +280,7 @@ function pressRoom(G, tab = "berita") {
   applyTheme(c.colors);
   const L = G.leagues[c.league];
   const xi = bestXI(G, c.id);
-  const body = tab === "berita" ? `<div class="story"><div class="sh"><div><h3>${esc(c.short)} rekrut talenta muda ${esc(u.fn)} ${esc(u.ln)}</h3><div class="muted" style="font-size:13px;margin-top:4px">${esc(L.name)} | Baru Saja</div></div><div class="row">${avatar(u.look, c.colors, 56, ageOn(u.birth, G.date))}${crest(c, 50)}</div></div>
+  const body = tab === "berita" ? `<div class="story"><div class="sh"><div><h3>${esc(c.short)} rekrut ${ageOn(u.birth, G.date) <= 21 ? "talenta muda " : ""}${esc(u.fn)} ${esc(u.ln)}</h3><div class="muted" style="font-size:13px;margin-top:4px">${esc(L.name)} | Baru Saja</div></div><div class="row">${avatar(u.look, c.colors, 56, ageOn(u.birth, G.date))}${crest(c, 50)}</div></div>
       <p>${esc(c.name)} resmi merekrut ${esc(fullName(u))}, ${POS_LABEL[u.main].toLowerCase()} berusia ${ageOn(u.birth, G.date)} tahun asal ${esc(u.birthplace || NATIONS[u.nat].name)}, untuk bergabung dengan ${u.squad === "Y" ? "tim U-19" : "skuad senior"} mereka.</p>
       <p>Staf akademi menyebut ${esc(u.fn)} sebagai pemain ${G.user.styles.length ? `dengan gaya ${G.user.styles.map(s => STYLES[s].label.toLowerCase()).join(", ")}` : "yang serba bisa"}, dan berharap ia bisa menembus tim utama dalam beberapa musim ke depan.</p>
       <p>${esc(c.short)} diprediksi finis di posisi ke-${predictedFinish(G, c)} ${esc(L.name)} musim ini.</p></div>`

@@ -4,6 +4,7 @@ import { shapePosition } from "./match.js";
 const L = 105, W = 68;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const ease = k => 1 - (1 - k) * (1 - k);
+const easeIO = k => (k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2);
 function rgb(c) {
   if (!c || !c.startsWith("#")) return [120, 120, 120];
   const h = c.slice(1); const n = parseInt(h.length === 3 ? h.split("").map(x => x + x).join("") : h, 16);
@@ -26,7 +27,8 @@ export class PitchPlayer {
     this.kits = kitPair(R.colors);
     const keyT = this.frames.filter(f => f.k === "shot" || f.k === "goal" || f.k === "pen" || f.k === "corner").map(f => f.t);
     this.near = t => keyT.some(k => t >= k - 20 && t <= k + 5);
-    this.slots = R.lineups.map(l => l.start.map(s => ({ ...s, x: 52.5, y: 34 })));
+    this.slots = R.lineups.map(l => l.start.map(s => ({ ...s, x: 52.5, y: 34, vx: 0, vy: 0, fx: 0, fy: -1, ph: Math.random() * 6 })));
+    this.spNow = 25; this.trail = [];
     this.evs = R.events.slice().sort((a, b) => a.t - b.t);
     this.t = 0; this.speed = 25; this.hl = true; this.paused = false; this.done = false;
     this.fi = 0; this.evi = 0; this.lastSaid = -1; this.score = [0, 0];
@@ -92,15 +94,17 @@ export class PitchPlayer {
   ballAt(tt) {
     const i = this.frameAt(tt), a = this.frames[i], b = this.frames[i + 1] || a;
     const gap = Math.max(0.01, b.t - a.t), d = Math.hypot(b.x - a.x, b.y - a.y);
-    const travel = clamp(d / 17 + 0.25, 0.3, gap);
+    const carried = a.c && b.c === a.c; // dribble: the carrier runs with the ball the whole time
+    const travel = carried ? gap : clamp(d / (["long", "cross"].includes(b.k) ? 22 : 15) + 0.2, 0.25, gap);
     const k = clamp((tt - a.t) / travel, 0, 1);
-    let x = a.x + (b.x - a.x) * ease(k), y = a.y + (b.y - a.y) * ease(k), z = 0;
+    const e = carried ? k : easeIO(k);
+    let x = a.x + (b.x - a.x) * e, y = a.y + (b.y - a.y) * e, z = 0;
     if (a.k === "shot" || a.k === "pen") {
       const gx = this.ar(a.s, a.h) ? L + 0.5 : -0.5, ts = 0.6;
       if (tt - a.t < ts) { const q = (tt - a.t) / ts; x = a.x + (gx - a.x) * q; y = a.y + (34 + (a.r === "off" ? 6 : 1) - a.y) * q; }
     }
     if (["long", "cross"].includes(b.k) || ["long", "cross"].includes(a.k)) z = Math.sin(Math.PI * k) * Math.min(6, d / 6);
-    return { x, y, z, i, a, b };
+    return { x, y, z, i, a, b, held: !!a.c && !carried && k >= 1 };
   }
   fire(e) {
     if (e.type === "goal") this.score[e.side]++;
@@ -109,8 +113,11 @@ export class PitchPlayer {
     this.hooks.onEvent?.(e, this);
   }
   update(tt, ball, dt) {
-    const a = ball.a, b = ball.b;
+    const a = ball.a, b = ball.b, F = this.frames;
+    const c2 = F[ball.i + 2];
     while (this.evi < this.evs.length && this.evs[this.evi].t <= tt) this.fire(this.evs[this.evi++]);
+    // who is about to receive the ball: run to meet it
+    const receiver = !b.c && c2 && c2.c ? c2.c : b.c && b.c !== a.c ? b.c : null;
     for (let side = 0; side < 2; side++) {
       const atk = this.ar(side, a.h);
       const Fx = atk ? ball.x : L - ball.x, Fy = atk ? ball.y : W - ball.y;
@@ -118,24 +125,49 @@ export class PitchPlayer {
         if (s.gone) continue;
         const q = shapePosition(s.sx, s.sy, s.pos, a.s === side, Fx, Fy);
         let tx = atk ? q.x : L - q.x, ty = atk ? q.y : W - q.y;
-        tx += Math.sin(tt / 9 + s.id) * 1.4; ty += Math.cos(tt / 11 + s.id * 1.7) * 1.4;
-        if (a.c === s.id) { tx = ball.x; ty = ball.y; } else if (!a.c && b.c === s.id) { tx = b.x; ty = b.y; }
-        s.tx = tx; s.ty = ty;
+        // smooth personal drift so the shape breathes instead of sliding as a block
+        tx += Math.sin(tt / 7 + s.id) * 1.6 + Math.sin(tt / 3.1 + s.id * 2.3) * 0.5;
+        ty += Math.cos(tt / 9 + s.id * 1.7) * 1.8 + Math.cos(tt / 2.7 + s.id) * 0.5;
+        // attacking runs: forwards push beyond the ball when their team has it
+        if (a.s === side && /ST|AM/.test(s.pos)) { const dir = atk ? 1 : -1; tx += dir * (2.5 + 2 * Math.sin(tt / 5 + s.id)); }
+        s.chase = false;
+        if (a.c === s.id || (b.c === s.id && a.c === s.id)) { tx = ball.x; ty = ball.y; s.chase = true; }
+        else if (receiver === s.id) { const tgt = !b.c ? b : b; tx = tgt.x; ty = tgt.y; s.chase = true; }
+        s.tx = clamp(tx, -1, L + 1); s.ty = clamp(ty, -1, W + 1);
       }
     }
+    // nearest defender closes the ball down
     const def = 1 - a.s; let best = null, bd = 1e9;
     for (const s of this.slots[def]) { if (s.gone || s.pos === "GK") continue; const d = Math.hypot(s.x - ball.x, s.y - ball.y); if (d < bd) { bd = d; best = s; } }
-    if (best && bd < 14) { const dir = this.ar(def, a.h) ? -1 : 1; best.tx = ball.x - dir * 1.6; best.ty = ball.y + 0.8; }
-    const step = 8.8 * dt;
-    for (const side of this.slots) for (const s of side) {
-      if (s.gone) continue;
-      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
-      if (d <= step || d > 40) { s.x = s.tx; s.y = s.ty; } else { s.x += dx / d * step; s.y += dy / d * step; }
+    if (best && bd < 16) { const dir = this.ar(def, a.h) ? -1 : 1; best.tx = ball.x - dir * 1.8; best.ty = ball.y + 0.6; best.chase = true; }
+    // steering: accelerate towards the target, ease into position (sub-steps keep fast playback stable)
+    let rem = Math.min(dt, 4);
+    while (rem > 1e-4) {
+      const h = Math.min(0.12, rem); rem -= h;
+      for (const side of this.slots) for (const s of side) {
+        if (s.gone) continue;
+        const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
+        if (d > 32) { s.x = s.tx; s.y = s.ty; s.vx = s.vy = 0; continue; }
+        const vmax = s.chase ? 7.6 : s.pos === "GK" ? 4 : 5.2;
+        const want = Math.min(vmax, d * 1.6);
+        const wx = d > 0.01 ? dx / d * want : 0, wy = d > 0.01 ? dy / d * want : 0;
+        const acc = s.chase ? 9 : 5.5, kk = Math.min(1, acc * h / Math.max(0.5, Math.hypot(wx - s.vx, wy - s.vy)));
+        s.vx += (wx - s.vx) * kk; s.vy += (wy - s.vy) * kk;
+        s.x += s.vx * h; s.y += s.vy * h;
+        const sp = Math.hypot(s.vx, s.vy);
+        if (sp > 0.4) { s.fx += (s.vx / sp - s.fx) * Math.min(1, h * 6); s.fy += (s.vy / sp - s.fy) * Math.min(1, h * 6); }
+        s.ph += sp * h * 1.9;
+      }
+    }
+    // a held ball sits at the carrier's feet
+    if (ball.held) {
+      const s = this.slots.flat().find(q => q.id === a.c && !q.gone);
+      if (s) { const n = Math.hypot(s.fx, s.fy) || 1; ball.x = s.x + s.fx / n * 0.8; ball.y = s.y + s.fy / n * 0.8; }
     }
   }
   narrate(i) {
     if (i <= this.lastSaid) { this.lastSaid = i; return; }
-    for (let j = this.lastSaid + 1; j <= i; j++) { const f = this.frames[j]; if (f) this.hooks.onFrame?.(f, this); }
+    for (let j = this.lastSaid + 1; j <= i; j++) { const f = this.frames[j]; if (f) this.hooks.onFrame?.(f, this, j); }
     this.lastSaid = i;
   }
   drawPlayers({ P, k }, ball) {
@@ -144,9 +176,14 @@ export class PitchPlayer {
     c.textAlign = "center"; c.textBaseline = "middle";
     for (let side = 0; side < 2; side++) for (const s of this.slots[side]) {
       if (s.gone) continue;
-      const [x, y] = P(s.x, s.y); const info = R.info[s.id] || {};
+      const [x0, y0] = P(s.x, s.y); const info = R.info[s.id] || {};
+      const spd = Math.hypot(s.vx, s.vy), bob = Math.min(1, spd / 6) * Math.sin(s.ph) * rad * 0.08;
+      const x = x0, y = y0 + bob;
       const gk = s.pos === "GK"; const fill = gk ? (side ? "#3fc1d6" : "#d8c43c") : this.kits[side][0];
-      c.beginPath(); c.arc(x, y + 1.5, rad, 0, Math.PI * 2); c.fillStyle = "rgba(0,0,0,.35)"; c.fill();
+      c.beginPath(); c.arc(x0, y0 + 1.5, rad, 0, Math.PI * 2); c.fillStyle = "rgba(0,0,0,.35)"; c.fill();
+      // facing notch
+      const [fxp, fyp] = P(s.x + s.fx, s.y + s.fy); const ang = Math.atan2(fyp - y0, fxp - x0);
+      c.beginPath(); c.moveTo(x + Math.cos(ang) * (rad + 4), y + Math.sin(ang) * (rad + 4)); c.lineTo(x + Math.cos(ang + 0.5) * rad, y + Math.sin(ang + 0.5) * rad); c.lineTo(x + Math.cos(ang - 0.5) * rad, y + Math.sin(ang - 0.5) * rad); c.closePath(); c.fillStyle = this.kits[side][1]; c.fill();
       c.beginPath(); c.arc(x, y, rad, 0, Math.PI * 2); c.fillStyle = fill; c.fill();
       c.lineWidth = 2; c.strokeStyle = gk ? "#111" : this.kits[side][1]; c.stroke();
       if (info.user) { c.beginPath(); c.arc(x, y, rad + 4, 0, Math.PI * 2); c.lineWidth = 3; c.strokeStyle = "#ffd54a"; c.stroke(); }
@@ -160,13 +197,18 @@ export class PitchPlayer {
       }
     }
     const [bx, by] = P(ball.x, ball.y), br = Math.max(3.5, k * 0.55) * (1 + ball.z / 10);
+    this.trail.push([bx, by - ball.z * 1.5]); if (this.trail.length > 7) this.trail.shift();
+    for (let i = 0; i < this.trail.length - 1; i++) { const [tx, ty] = this.trail[i]; c.beginPath(); c.arc(tx, ty, br * (0.3 + i / 14), 0, Math.PI * 2); c.fillStyle = `rgba(255,255,255,${0.05 + i * 0.03})`; c.fill(); }
     c.beginPath(); c.arc(bx + ball.z * 1.2, by + 2 + ball.z * 1.5, Math.max(3, k * 0.5), 0, Math.PI * 2); c.fillStyle = "rgba(0,0,0,.35)"; c.fill();
     c.beginPath(); c.arc(bx, by - ball.z * 1.5, br, 0, Math.PI * 2); c.fillStyle = "#fff"; c.fill(); c.lineWidth = 1; c.strokeStyle = "#111"; c.stroke();
   }
   loop(now) {
     if (this.dead) return;
     const realDt = Math.min(0.1, (now - this.last) / 1000); this.last = now;
-    const sp = this.hl ? (this.near(this.t) ? 3 : 70) : this.speed;
+    const target = this.hl ? (this.near(this.t) ? 2.5 : 45) : this.speed;
+    // ease between playback speeds so highlights don't jerk
+    this.spNow += (target - this.spNow) * Math.min(1, realDt * (target < this.spNow ? 6 : 2));
+    const sp = this.spNow;
     if (!this.paused && !this.done) { this.t += realDt * sp; if (this.t >= this.endT) { this.t = this.endT; this.finish(); } }
     const g = this.geom(), ball = this.ballAt(this.t);
     this.update(this.t, ball, this.paused ? 0 : realDt * sp);

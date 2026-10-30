@@ -266,7 +266,7 @@ main.page { padding: 10px 10px calc(var(--bot) + 24px); max-width: 980px; margin
 .livepitch { position: relative; flex: none; width: 100%; aspect-ratio: 105 / 72; max-height: 56vh; background: #0d1a12; }
 @media (orientation: portrait) and (min-aspect-ratio: 0) { .livepitch { aspect-ratio: auto; height: min(56vh, calc(100vw * 0.72)); } }
 .livepitch canvas { width: 100%; height: 100%; display: block; touch-action: none; }
-.liveticker { padding: 6px 10px; background: #141118; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; min-height: 34px; }
+.liveticker { padding: 6px 10px; background: #141118; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: 14px; min-height: 52px; }
 .livetabs { display: flex; background: #141118; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .livetabs button { flex: 1 0 auto; background: none; border: 0; color: var(--muted); padding: 9px 10px; font-size: 13.5px; border-bottom: 2px solid transparent; }
 .livetabs button[aria-selected="true"] { color: #fff; border-bottom-color: #fff; }
@@ -385,3 +385,11 @@ main.page { padding: 10px 10px calc(var(--bot) + 24px); max-width: 980px; margin
 .tie .t.l { opacity: .55; }
 .tie.me { outline: 1px solid var(--go-a); }
 .tie small { color: var(--muted); display: block; margin-top: 2px; }
+
+.liveticker .now { font-weight: 600; }
+.liveticker .now.in { animation: tickin .35s ease-out; }
+.liveticker .prev { font-size: 12.5px; opacity: .55; margin-top: 2px; min-height: 1em; }
+@keyframes tickin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e5484d; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; margin-left: 5px; vertical-align: 2px; }
+.ibtn .dot { position: absolute; top: 4px; right: 4px; min-width: 16px; height: 16px; border-radius: 8px; background: #e5484d; color: #fff; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 3px; border: 2px solid var(--top, #222); }
+.ibtn { position: relative; }

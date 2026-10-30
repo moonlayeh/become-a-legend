@@ -1,7 +1,8 @@
 // Plays several seasons automatically and prints a sanity report.
 import { table, userP } from "../www/js/world.js";
 import { continueGame, playPending, rngOf, newCareer } from "../www/js/sim.js";
-import { resolveDecision, squadStatus } from "../www/js/career.js";
+import { resolveDecision, squadStatus, doTraining } from "../www/js/career.js";
+import { acceptClubOffer } from "../www/js/contract.js";
 import { serialize, deserialize } from "../www/js/save.js";
 import { fmt, ageOn } from "../www/js/calendar.js";
 import { fullName } from "../www/js/player.js";
@@ -19,8 +20,10 @@ while (!G.user.retired && G.season < endYear) {
   const s = continueGame(G);
   stops[s] = (stops[s] || 0) + 1;
   if (s === "match") { const r = playPending(G, matches % 20 === 0); matches++; if (r.replay) viewed++; }
+  if (s === "training") { const r = rngOf(G); doTraining(G, r, "Normal"); G.rs = r.s; }
   if (s === "decision") {
     const m = G.inbox.find(x => x.kind === "decision" && !x.done);
+    if (m.options.some(o => o.act === "openNeg")) { const r = rngOf(G); acceptClubOffer(G, r); G.rs = r.s; continue; }
     const pick = m.options.findIndex(o => /transfer|loan|signContract|freeAgent/.test(o.act));
     resolveDecision(G, m.id, pick >= 0 ? pick : 0, rngOf(G));
   }

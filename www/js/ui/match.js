@@ -1,6 +1,7 @@
 // Match day: lineup reveal, live 2D match, result screen
 import { register, go, save, S, render } from "./shell.js";
-import { $, $$, esc, crest, pill, pill1, avatar, lookFor, jersey, flagBadge, lum, toast } from "./core.js";
+import { $, $$, esc, crest, pill, pill1, avatar, lookFor, jersey, flagBadge, lum, toast, silhouette } from "./core.js";
+import { teamTalkLine, MINDSETS } from "../contract.js";
 import { NATIONS } from "../data.js";
 import { fmtDay, ageOn } from "../calendar.js";
 import { userP } from "../world.js";
@@ -31,8 +32,11 @@ register("laga", "pra", (G, root, p) => {
   <div class="lineup"><div class="lh" style="background:${col[0]};color:${lum(col[0]) > 62 ? "#111" : "#fff"}">${esc(T.name)}</div>
     <div class="lpitch">${lineupPlates(G, T, col)}</div>
     <div class="subs"><h4>Cadangan</h4>${T.bench.map(q => `<div class="${q.isUser ? "me" : ""}"><b>${numOf(G, q.id, T)}</b><span>${esc(q.ln)}${q.isUser ? " (kamu)" : ""}</span><span class="muted" style="margin-left:auto">${q.main}</span></div>`).join("")}</div></div>
+  ${["XI", "Cadangan"].includes(pd.role) ? `<div class="card" style="margin-top:12px"><div class="ch">Arahan Tim</div><div class="row" style="gap:10px;align-items:flex-start">${silhouette(36)}<div style="font-size:14.5px;font-style:italic">"${esc(teamTalkLine(G, pd, H, A))}"</div></div>
+    <div class="lbl" style="margin:10px 0 6px">Pola pikirmu sebelum laga</div>${Object.entries(MINDSETS).map(([k, v]) => `<button class="opt" data-mind="${k}" aria-pressed="${pd.mind === k}" style="${pd.mind === k ? "border-color:var(--go-a)" : ""}"><b>${pd.mind === k ? "✓ " : ""}${k}</b><span>${esc(v.desc)}</span></button>`).join("")}</div>` : ""}
   <div style="display:flex;gap:8px;margin-top:12px"><button class="btn pri" id="watch" style="flex:1;min-height:48px;font-family:var(--display);font-size:20px">Mulai Laga</button><button class="btn" id="quick" style="flex:1;min-height:48px">Lewati ke hasil</button></div>`;
   $$("[data-side]", root).forEach(b => (b.onclick = () => go("laga", "pra", { side: +b.dataset.side }, true)));
+  $$("[data-mind]", root).forEach(b => (b.onclick = () => { pd.mind = pd.mind === b.dataset.mind ? null : b.dataset.mind; save(); go("laga", "pra", { side }, true); }));
   $("#watch", root).onclick = () => play(G, true);
   $("#quick", root).onclick = () => play(G, false);
 });
@@ -65,7 +69,7 @@ function live(G, R, Sm) {
     <div class="livebar"><button class="ibtn" id="lp" aria-label="Jeda">❚❚</button><div class="clock" id="lc">0'</div>
       <div class="livescore"><span>${esc(R.short[0])}</span><span class="k" style="background:${kits[0][0]}"></span><span class="s" id="ls">0 - 0</span><span class="k" style="background:${kits[1][0]}"></span><span>${esc(R.short[1])}</span></div></div>
     <div class="livepitch"><canvas></canvas></div>
-    <div class="liveticker" id="lt" aria-live="polite">Sepak mula!</div>
+    <div class="liveticker" id="lt" aria-live="polite"><div class="now">Sepak mula!</div><div class="prev"></div></div>
     <div class="livetabs" role="tablist">${[["ev", "Peristiwa"], ["st", "Statistik"], ["fm", "Formasi"], ["mo", "Momentum"]].map(([k, l], i) => `<button data-lt="${k}" aria-selected="${i === 0}">${l}</button>`).join("")}</div>
     <div class="livepanel" id="lpanel"></div>
     <div class="livectl"><button class="btn sm" data-a="hl" aria-pressed="true">Sorotan</button><button class="btn sm" data-s="10">×10</button><button class="btn sm" data-s="25" aria-pressed="true">×25</button><button class="btn sm" data-s="60">×60</button><button class="btn sm pri" data-a="end" style="margin-left:auto">Ke akhir</button></div>`;
@@ -73,25 +77,37 @@ function live(G, R, Sm) {
   history.pushState({ live: true }, "");
   let tab = "ev", lastPaint = 0;
   const lines = {}; for (const l of R.lines) lines[l.id] = l;
+  // running commentary: every action can produce a line; ordinary lines are paced, key moments jump the queue
+  let lastSay = 0, pending = null;
+  const say = (html, prio = false) => {
+    const now = performance.now();
+    if (!prio && now - lastSay < 1100) { pending = html; return; }
+    const box = $("#lt", el), cur = box.querySelector(".now");
+    box.querySelector(".prev").innerHTML = cur.innerHTML;
+    cur.innerHTML = html; cur.classList.remove("in"); void cur.offsetWidth; cur.classList.add("in");
+    lastSay = now; pending = null;
+  };
   const pp = new PitchPlayer(el.querySelector("canvas"), R, {
     onEvent: (e, P) => {
       const tn = R.names[e.side];
       const msg = e.type === "goal" ? `<b>GOL!</b> ${esc(e.name)} (${esc(tn)})${e.ast ? ` · assist ${esc(e.ast)}` : ""}` : e.type === "yc" ? `🟨 ${esc(e.name)} (${esc(tn)})` : e.type === "rc" ? `🟥 <b>Kartu merah</b> ${esc(e.name)}` : e.type === "sub" ? `🔁 ${esc(e.name)} masuk, ${esc(e.off)} keluar` : e.type === "inj" ? `✚ ${esc(e.name)} cedera` : e.type === "pen" ? `<b>Penalti</b> untuk ${esc(tn)}!` : e.type === "penmiss" ? "Penalti gagal!" : "";
-      if (msg) $("#lt", el).innerHTML = msg;
+      if (msg) say(msg, true);
       $("#ls", el).textContent = `${P.score[0]} - ${P.score[1]}`;
     },
-    onFrame: (f, P) => {
-      const nm = f.c && R.info[f.c] ? R.info[f.c].name : "";
-      const t = f.k === "shot" ? (f.r === "save" ? `${nm} menembak, ditepis kiper.` : f.r === "blk" ? `Tembakan ${nm} diblok.` : `${nm} menembak, melebar.`) : f.k === "corner" ? `Sepak pojok untuk ${R.names[f.s]}.` : f.k === "half" && f.h === 2 ? "Babak kedua dimulai." : f.k === "end" && f.h === 1 ? "Turun minum." : "";
-      if (t) $("#lt", el).textContent = t;
+    onFrame: (f, P, j) => {
+      const r = commentary(R, P.frames, j, P);
+      if (r) say(r.t, r.prio);
     },
     onTick: P => {
       $("#lc", el).textContent = P.clockLabel();
+      if (pending && performance.now() - lastSay > 1100) say(pending);
       const now = performance.now(); if (now - lastPaint < 400) return; lastPaint = now;
       paintPanel(G, R, Sm, P, tab, $("#lpanel", el), lines);
     },
-    onEnd: () => { $("#lt", el).innerHTML = "<b>Peluit panjang.</b>"; const b = el.querySelector('[data-a="end"]'); b.textContent = "Lihat hasil"; $("#ls", el).textContent = `${Sm.score[0]} - ${Sm.score[1]}`; paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); },
+    onEnd: () => { say(`<b>Peluit panjang.</b> ${esc(R.names[0])} ${Sm.score[0]}-${Sm.score[1]} ${esc(R.names[1])}`, true); const b = el.querySelector('[data-a="end"]'); b.textContent = "Lihat hasil"; $("#ls", el).textContent = `${Sm.score[0]} - ${Sm.score[1]}`; paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); },
   });
+  pp.speed = G.settings?.speed || 25;
+  $$("[data-s]", el).forEach(x => x.setAttribute("aria-pressed", +x.dataset.s === pp.speed));
   const close = () => { pp.destroy(); el.remove(); window.removeEventListener("popstate", onPop); go("laga", "hasil", {}, true); };
   const onPop = () => { if (pp.done) close(); else { pp.finish(); history.pushState({ live: true }, ""); } };
   window.addEventListener("popstate", onPop);
@@ -104,6 +120,43 @@ function live(G, R, Sm) {
     if (b.dataset.lt) { tab = b.dataset.lt; $$("[data-lt]", el).forEach(x => x.setAttribute("aria-selected", x === b)); paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); }
   });
   paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines);
+}
+// play-by-play lines from the engine's action frames
+const pick = (arr, n) => arr[Math.abs(n) % arr.length];
+function commentary(R, F, j, P) {
+  const f = F[j], prev = F[j - 1], next = F[j + 1];
+  if (!f) return null;
+  const nm = id => (id && R.info[id] ? esc(R.info[id].name) : "");
+  const team = s => esc(R.names[s]);
+  const zone = (() => { const atk = (f.s === 0) === (f.h === 1); const x = atk ? f.x : 105 - f.x; return x > 88 ? "di kotak penalti" : x > 70 ? "di sepertiga akhir" : x > 45 ? "di lini tengah" : "di area sendiri"; })();
+  const me = id => R.info[id]?.user;
+  const hl = (id, txt) => (me(id) ? `<b style="color:#ffd54a">${txt}</b>` : txt);
+  switch (f.k) {
+    case "kick": return { t: f.h === 2 ? "Babak kedua dimulai." : `Sepak mula! ${team(f.s)} memulai pertandingan.`, prio: true };
+    case "half": return f.h === 2 ? { t: "Babak kedua dimulai.", prio: true } : null;
+    case "end": return { t: f.h === 1 ? "Peluit tanda turun minum." : "Peluit panjang berbunyi.", prio: true };
+    case "pass": {
+      const from = prev?.c, to = next?.c;
+      if (f.r === "int") return { t: `Umpan ${nm(from)} dipotong lawan.` };
+      if (f.r === "off") return { t: `${nm(next?.c) || "Penyerang"} terperangkap offside.` };
+      if (f.r === "out") return { t: `Umpan ${nm(from)} keluar lapangan.` };
+      if (!from || !to) return null;
+      return { t: hl(from, pick([`${nm(from)} mengalirkan bola ke ${nm(to)} ${zone}.`, `${nm(from)} → ${nm(to)}.`, `Operan pendek ${nm(from)} untuk ${nm(to)}.`, `${team(f.s)} memutar bola, ${nm(from)} ke ${nm(to)}.`], j)) };
+    }
+    case "long": return f.r === "clr" ? { t: `${nm(prev?.c) || "Bek"} membuang bola jauh-jauh.` } : { t: hl(prev?.c, `${nm(prev?.c)} melepas umpan panjang${next?.c ? ` mencari ${nm(next.c)}` : ""}.`) };
+    case "cross": return { t: hl(prev?.c, `${nm(prev?.c) || team(f.s)} mengirim umpan silang ke kotak penalti!`), prio: true };
+    case "drib": return { t: hl(f.c, pick([`${nm(f.c)} menggiring bola ${zone}.`, `${nm(f.c)} melewati lawannya!`, `${nm(f.c)} membawa bola maju.`], j)) };
+    case "tackle": return { t: hl(f.c, `Tekel bersih dari ${nm(f.c)}!`) };
+    case "foul": return { t: `Pelanggaran! Wasit menghentikan permainan.` };
+    case "fk": return { t: `Tendangan bebas untuk ${team(f.s)} ${zone}.`, prio: true };
+    case "throw": return { t: `Lemparan ke dalam untuk ${team(f.s)}.` };
+    case "gk": return { t: `Tendangan gawang untuk ${team(f.s)}.` };
+    case "corner": return { t: `Sepak pojok untuk ${team(f.s)}.`, prio: true };
+    case "pen": return { t: `<b>Penalti</b> untuk ${team(f.s)}!`, prio: true };
+    case "recv": return f.r === "claim" ? { t: `Kiper ${nm(f.c)} mengamankan bola.` } : null;
+    case "shot": return { t: f.r === "save" ? hl(prev?.c, `${nm(prev?.c) || "Tembakan"} melepaskan tembakan... ditepis kiper!`) : f.r === "blk" ? `Tembakan ${nm(prev?.c)} diblok!` : hl(prev?.c, `${nm(prev?.c)} menembak, sedikit melebar!`), prio: true };
+    default: return null;
+  }
 }
 function liveRating(l, t, endT, evs) {
   if (!l) return null;
