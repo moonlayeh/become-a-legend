@@ -148,6 +148,7 @@ function mailDetail(G, root, p) {
     <div class="mailbody">${esc(m.body)}</div>
     ${m.changes ? `<div style="padding:0 12px 12px;display:flex;flex-wrap:wrap;gap:6px">${m.changes.map(c => `<span class="tag" style="border-color:${c.to > c.from ? "var(--good)" : "var(--bad)"};color:${c.to > c.from ? "var(--good)" : "var(--bad)"}">${esc(c.name)} ${c.from}→${c.to}</span>`).join("")}</div>` : ""}
     ${m.kind === "decision" ? `<div style="padding:0 12px 12px">${m.done ? `<div class="card" style="margin:0;background:rgba(255,255,255,.05)"><b>${esc(m.options[m.choice]?.label || "")}</b><div class="muted">${esc(m.result || "")}</div></div>` : m.options.map((o, i) => `<button class="opt" data-o="${i}"><b>${esc(o.label)}</b><span>${esc(o.detail || "")}</span></button>`).join("")}</div>` : ""}
+    ${m.done && m.options?.some(o => o.act === "openPress") && G.press?.id === m.options[0].data?.press && !G.press.done ? `<div style="padding:0 12px 12px"><button class="btn pri" data-go="pers/konferensi" style="width:100%">Kembali ke konferensi pers</button></div>` : ""}
     ${m.done && m.options?.some(o => o.act === "openNeg") && G.neg?.id === m.options[0].data?.neg && ["open", "final"].includes(G.neg.status) ? `<div style="padding:0 12px 12px"><button class="btn pri" data-go="pemain/negosiasi" style="width:100%">Lanjutkan negosiasi</button></div>` : ""}
     ${extra}
   </div>`;
@@ -156,6 +157,7 @@ function mailDetail(G, root, p) {
     const o = m.options[+b.dataset.o];
     const rng = rngOf(G); const msg = resolveDecision(G, m.id, +b.dataset.o, rng); G.rs = rng.s; save();
     if (o?.act === "openNeg") { go("pemain", "negosiasi"); return; }
+    if (o?.act === "openPress") { go("pers", "konferensi"); return; }
     toast(msg || "Keputusan dicatat."); render();
   }));
 }

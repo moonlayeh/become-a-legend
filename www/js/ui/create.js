@@ -1,5 +1,5 @@
 // Main menu, player creation wizard and the signing announcement.
-import { $, $$, esc, crest, avatar, jersey, flagEmoji, SKINS, HAIR_COLORS, HAIR_STYLES, BEARDS, toast, applyTheme, lum } from "./core.js";
+import { $, $$, esc, crest, avatar, jersey, flagEmoji, SKINS, HAIR_COLORS, HAIR_STYLES, BEARDS, GLASSES, toast, applyTheme, lum } from "./core.js";
 import { NATIONS, LEAGUES, CLUBS, POSITIONS, POS_LABEL } from "../data.js";
 import { LANGUAGES } from "../nations.js";
 import { ID_REGIONS } from "../regions.js";
@@ -58,7 +58,7 @@ const ABOUT = `<div class="card" style="margin-top:14px;font-size:13.5px;line-he
 
 // ---------- wizard ----------
 function startWizard() {
-  W = { fn: "", ln: "", nick: "", birth: "2010-02-06", birthplace: "", bcountry: "IDN", bprov: "", nat: "IDN", nat2: "", langs: ["Indonesia"], look: { skin: 2, hair: 2, hc: 0, beard: 0 }, height: 176, pos: "ST", secondary: [], foot: "Kanan", wf: "Sedang", styles: [], traits: [], club: "acak", league: "IDN1", difficulty: "Normal", potential: "Berbakat", sub: 0 };
+  W = { fn: "", ln: "", nick: "", birth: "2010-02-06", birthplace: "", bcountry: "IDN", bprov: "", nat: "IDN", nat2: "", langs: ["Indonesia"], look: { skin: 2, hair: 2, hc: 0, beard: 0, gl: 0 }, height: 176, pos: "ST", secondary: [], foot: "Kanan", wf: "Sedang", styles: [], traits: [], club: "acak", league: "IDN1", difficulty: "Normal", potential: "Berbakat", sub: 0 };
   step = 0; paint(true);
 }
 function ageNow() { return ageOn(fromIso(W.birth), START); }
@@ -164,7 +164,7 @@ function stepLook() {
   const chips = (key, arr, label) => `<div class="lbl" style="margin-bottom:6px">${label}</div><div class="chipsel">${arr.map((c, i) => `<button data-k="${key}" data-v="${i}" aria-pressed="${W.look[key] === i}">${c}</button>`).join("")}</div>`;
   return `<div style="display:grid;place-items:center;background:#222129;border-radius:8px;padding:12px;margin-bottom:12px">${avatar(W.look, ["#c62828", "#ffffff"], 150, ageNow())}<b style="margin-top:6px">${esc(W.fn)} ${esc(W.ln)}</b></div>
   <h2>Penampilan</h2><p class="help">Avatar ini muncul di profil, susunan pemain, dan berita.</p>
-  ${sw("skin", SKINS, "Warna kulit")}${chips("hair", HAIR_STYLES, "Gaya rambut")}${sw("hc", HAIR_COLORS, "Warna rambut")}${chips("beard", BEARDS, "Jenggot/kumis")}
+  ${sw("skin", SKINS, "Warna kulit")}${chips("hair", HAIR_STYLES, "Gaya rambut")}${sw("hc", HAIR_COLORS, "Warna rambut")}${chips("beard", BEARDS, "Jenggot/kumis")}${chips("gl", GLASSES, "Kacamata")}
   <label class="fld"><span>Tinggi badan: <b id="hv">${W.height} cm</b></span><input type="range" id="ht" min="160" max="200" value="${W.height}" style="min-height:auto;padding:0"></label>`;
 }
 bind[1] = () => {

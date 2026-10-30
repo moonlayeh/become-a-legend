@@ -16,7 +16,8 @@ import {
   AGENT_TOPICS, agentTalk, agentOf, homegrownStatus, permitOK, permitPoints, MATE_TOPICS, mateTalk, relWord,
 } from "../contract.js";
 import { header, ratingChart } from "./player.js";
-import { PERF_VIEWS, perfView, careerTimeline } from "./extra.js";
+import { mediaWord } from "../press.js";
+import { PERF_VIEWS, perfView, careerTimeline, careerStatsHtml } from "./extra.js";
 
 const avgR = st => (st && st.rn ? st.rsum / st.rn : null);
 const own = p => !!p.isUser;
@@ -106,7 +107,7 @@ register("pemain", "pribadi", (G, root, prm) => {
       ["Tempat lahir", `${p.birthplace ? esc(p.birthplace) + ", " : ""}${esc(NATIONS[p.nat].name)}`], ["Kewarganegaraan", `${natTag(p.nat)}${p.nat2 ? ` · ${natTag(p.nat2)}` : ""}`],
       ["Bahasa", esc(langs.map(l => `${l} (${langLevel(G, p, l)})`).join(", ") || "-")], ["Reputasi", `<span style="color:${REP_COLOR[reputation(G, p)]}">●</span> ${reputation(G, p)}`],
       ["Kepribadian", esc(personality(p))], ["Berbasis di", club ? `${flagEmoji(club.nation)} ${esc(NATIONS[club.nation].name)}` : "-"],
-      own(p) ? ["Agen", `${esc(agentOf(G).name)} <span class="muted">(${esc(agentOf(G).level)})</span>`] : null, ["Deskripsi media", esc(mediaDesc(G, p))],
+      own(p) ? ["Agen", `${esc(agentOf(G).name)} <span class="muted">(${esc(agentOf(G).level)})</span>`] : null, ["Deskripsi media", esc(mediaDesc(G, p))], own(p) ? ["Citra di media", esc(mediaWord(G.user.media || 0))] : null,
     ])) +
     card("Kebahagiaan", `<div class="row" style="gap:10px;margin-bottom:8px"><span style="font-size:30px">${moraleFace(p.morale ?? 65)}</span><b style="font-size:18px">${moraleWord(p.morale ?? 65)}</b></div>
       <div class="lbl" style="color:var(--good)">Hal positif</div>${hp.pos.map(t => `<div style="font-size:14px;padding:3px 0">🙂 ${esc(t)}</div>`).join("")}
@@ -218,7 +219,12 @@ register("pemain", "karier", (G, root, prm) => {
   const p = G.players[prm.pid] || userP(G);
   if (!own(p)) { root.innerHTML = header(G, p) + card("Karier", `<table class="tbl"><tbody><tr><td>${seasonLabel(G.season)}</td><td>${esc(G.clubs[p.club]?.name || "")}</td><td class="n">${p.st.apps + p.st.sub}</td><td class="n">${p.st.gls}</td></tr></tbody></table><p class="muted" style="font-size:13px">Riwayat lengkap hanya dicatat untuk kariermu sendiri.</p>`); return; }
   const kv0 = prm.kv || "ringkasan";
-  const ktabs = `<div class="seg" style="margin-bottom:10px">${[["ringkasan", "Ringkasan"], ["linimasa", "Linimasa"]].map(([k, l]) => `<button data-kv="${k}" aria-pressed="${kv0 === k}">${l}</button>`).join("")}</div>`;
+  const ktabs = `<div class="seg" style="margin-bottom:10px">${[["ringkasan", "Ringkasan"], ["linimasa", "Linimasa"], ["statistik", "Statistik"]].map(([k, l]) => `<button data-kv="${k}" aria-pressed="${kv0 === k}">${l}</button>`).join("")}</div>`;
+  if (kv0 === "statistik") {
+    root.innerHTML = header(G, p) + ktabs + careerStatsHtml(G);
+    $$("[data-kv]", root).forEach(b => (b.onclick = () => go("pemain", "karier", { ...prm, kv: b.dataset.kv }, true)));
+    return;
+  }
   if (kv0 === "linimasa") {
     const f = prm.kf || "semua";
     const ev = careerTimeline(G, f);

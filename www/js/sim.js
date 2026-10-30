@@ -4,6 +4,7 @@ import { NATIONS } from "./data.js";
 import { A } from "./attributes.js";
 import { fullName, shortName, newStats, fairWage } from "./player.js";
 import { simulateMatch, matchGen, FORMATIONS } from "./match.js";
+import { maybePress } from "./press.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day, nextWeekday } from "./calendar.js";
 import {
   userP, userClub, pickTeam, quickSim, applyLine, developPlayer, makeFixtures, addMail, addNews, table,
@@ -350,7 +351,19 @@ function finishPending(G, rng, H, Aw, res, record) {
   G.lastMatch = summary;
   if ((pd.kind === "liga" || pd.kind === "comp") && !pd.youth && summary.user) {
     const r = summary.user.rating;
-    if (!G.user.debutClub || G.user.debutClub.club !== u.club) { G.user.debutClub = { club: u.club, date: G.date }; addMail(G, "Debut!", `Kamu melakoni debut untuk ${userClub(G).name} melawan ${u.club === H.club ? Aw.name : H.name} (${summary.user.min} menit, rating ${r.toFixed(1)}).`, "good"); }
+    let debut = false;
+    if (!G.user.debutClub || G.user.debutClub.club !== u.club) { debut = true; G.user.debutClub = { club: u.club, date: G.date }; addMail(G, "Debut!", `Kamu melakoni debut untuk ${userClub(G).name} melawan ${u.club === H.club ? Aw.name : H.name} (${summary.user.min} menit, rating ${r.toFixed(1)}).`, "good"); }
+    const me = summary.user, side = me.side, gf = res.score[side], ga = res.score[1 - side];
+    maybePress(G, rng, { opp: side === 0 ? Aw.name : H.name, gls: me.gls, pom: res.pom === u.id, rc: me.rc > 0, debut, final: /Final/.test(comp || "") && !/Semifinal|Perempat/.test(comp || ""), start: me.start, sub: !me.start, won: gf > ga, lost: gf < ga, ntPossible: ageOn(u.birth, G.date) >= 17 });
+  }
+  // running career totals (all competitive and friendly matches the player appeared in)
+  if (summary.user && pd.kind !== "friendly") {
+    const me = summary.user, side = me.side, gf = res.score[side], ga = res.score[1 - side];
+    const add = t => { t.apps++; t.min += me.min; t.gls += me.gls; t.ast += me.ast; t.pom += res.pom === u.id ? 1 : 0; t.gf += gf; t.ga += ga; if (gf > ga) t.w++; else if (gf < ga) t.l++; else t.d++; t.rsum += me.rating; };
+    const blank = () => ({ apps: 0, min: 0, gls: 0, ast: 0, pom: 0, gf: 0, ga: 0, w: 0, d: 0, l: 0, rsum: 0 });
+    const T = G.user.totals || (G.user.totals = { all: blank(), club: {}, nt: blank() });
+    add(T.all);
+    if (pd.kind === "timnas") add(T.nt); else add(T.club[u.club] || (T.club[u.club] = blank()));
   }
   let replay = null;
   if (record) {

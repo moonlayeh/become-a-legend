@@ -40,6 +40,7 @@ export const SECTIONS = {
   timnas: { label: "Tim Nasional", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"]] },
   cari: { label: "Rekrutmen", tabs: [["pemain", "Database Pemain"]] },
   staf: { label: "Staf", tabs: [["profil", "Profil"]] },
+  pers: { label: "Konferensi Pers", tabs: [["konferensi", "Konferensi Pers"]] },
 };
 const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"], ["timnas", "Tim Nasional"], ["cari", "Database Pemain"], ["pengaturan", "Pengaturan"]];
 export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal", moments: "normal", momentTimer: 8 };

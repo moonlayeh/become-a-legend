@@ -13,6 +13,7 @@ import { RNG, clamp } from "../rng.js";
 import { hash, reputation, REP_COLOR, staffOf, ntCoach, ROLES, roleStars, bestRole, PITCH_XY, famWord, fitnessWord, severity, severityWord, clubMatchDays, userMatchDays, clubReputation } from "../meta.js";
 import { ROLE_PT, roleShare, interestedClubs, agentOf, homegrownStatus, relWord } from "../contract.js";
 import { header } from "./player.js";
+import { answerPress, finishPress, pressMood, MOODS, MOOD_COLOR, mediaWord } from "../press.js";
 
 const card = (title, body, extra = "") => `<div class="card" ${extra}>${title ? `<div class="ch">${title}</div>` : ""}${body}</div>`;
 const kv = rows => `<div class="kv" style="margin:0">${rows.filter(Boolean).map(([k, v]) => `<div><div class="k">${k}</div><div class="v" style="white-space:normal">${v}</div></div>`).join("")}</div>`;
@@ -399,3 +400,42 @@ register("pemain", "bandingkan", (G, root, prm) => {
   $("#cr", root).onchange = e => go("pemain", "bandingkan", { ...prm, pid: +e.target.value }, true);
   $$("[data-bv]", root).forEach(b => (b.onclick = () => go("pemain", "bandingkan", { ...prm, bv: b.dataset.bv }, true)));
 });
+
+// ============ KONFERENSI PERS ============
+register("pers", "konferensi", (G, root) => {
+  const P = G.press;
+  if (!P) { root.innerHTML = card("", '<div class="muted">Tidak ada konferensi pers.</div>'); return; }
+  const u = userP(G), club = userClub(G);
+  const q = P.questions[P.idx];
+  const cur = q ? P.journalists[q.j] : null;
+  const mood = m => `<span class="tag" style="border-color:${MOOD_COLOR[MOODS[m]]};color:${MOOD_COLOR[MOODS[m]]}">● ${MOODS[m]}</span>`;
+  const bubble = (who, sub, text, av) => `<div class="row" style="gap:10px;align-items:flex-start">${av}<div style="flex:1;min-width:0"><b>${esc(who)}</b> <span class="muted" style="font-size:12.5px">${esc(sub)}</span><div style="margin-top:6px;background:#3b5bdb;padding:9px 12px;border-radius:12px;font-size:14.5px">${esc(text)}</div></div></div>`;
+  const opts = q ? [["pos", "Positif", "var(--good)"], ["neu", "Netral", "#c9b6ff"], ["neg", "Negatif", "var(--bad)"]].map(([k, l, c]) => `<div class="lbl" style="margin:10px 0 6px;border-left:3px solid ${c};padding-left:6px">${l}</div>${q[k].map((t, i) => `<button class="opt" data-ans="${k}" data-i="${i}"><span style="font-size:14px">${esc(t)}</span></button>`).join("")}`).join("") : "";
+  root.innerHTML = `<div class="card"><div class="spread"><div><b style="font-size:18px">Konferensi Pers</b><div class="muted" style="font-size:12.5px">Ruang Konferensi Pers · ${P.journalists.length} wartawan · ${esc(P.title)}</div></div><span class="tag" style="border-color:${MOOD_COLOR[pressMood(P)]};color:${MOOD_COLOR[pressMood(P)]}">${pressMood(P)}</span></div>
+      ${!P.done ? `<div class="muted" style="font-size:12.5px;margin-top:6px">Pertanyaan ${Math.min(P.idx + 1, P.questions.length)} dari ${P.questions.length}</div>` : ""}</div>
+    <div class="card">${P.done ? bubble(P.officer, "Petugas Pers", "Terima kasih semuanya, konferensi pers selesai.", silhouette(40)) : P.idx === 0 && !P.started ? bubble(P.officer, "Petugas Pers", `Oke, kita mulai dengan pertanyaan pertama dari ${cur.name}, ${cur.outlet}.`, silhouette(40)) : bubble(cur.name, cur.outlet, q.q, silhouette(40))}</div>
+    ${!P.done ? (P.idx === 0 && !P.started ? `<div class="card"><button class="btn pri" id="pstart" style="width:100%;min-height:46px">Mulai Konferensi Pers</button></div>` : `<div class="card"><div class="row" style="gap:8px;margin-bottom:4px">${avatar(lookFor(u), club.colors, 36, ageOn(u.birth, G.date))}<b>${esc(fullName(u))}</b></div>${opts}</div>`) : ""}
+    <div class="card"><div class="ch">Wartawan</div><div class="grid2">${P.journalists.map((j, i) => `<div style="background:${q && q.j === i && !P.done ? "#4a2fa8" : "rgba(255,255,255,.04)"};border-radius:8px;padding:8px;text-align:center"><b style="font-size:13.5px">${esc(j.name)}</b><div class="muted" style="font-size:12px">${esc(j.outlet)}</div><div style="margin-top:4px">${mood(j.mood)}</div></div>`).join("")}</div></div>
+    ${P.log.length ? card("Jawabanmu", P.log.map(l => `<div style="padding:6px 0;border-top:1px solid var(--line);font-size:13.5px"><div class="muted">${esc(P.journalists[l.j].outlet)}: ${esc(l.q)}</div><div style="color:${l.tone === "pos" ? "var(--good)" : l.tone === "neg" ? "var(--bad)" : "inherit"}">"${esc(l.text)}"</div></div>`).join("")) : ""}
+    <div class="card">${P.done ? `<div style="font-size:14px;margin-bottom:8px">Citra di media: <b>${esc(mediaWord(G.user.media || 0))}</b></div><button class="btn pri" id="pdone" style="width:100%">Selesai</button>` : `<button class="btn danger" id="pleave" style="width:100%">Tinggalkan Konferensi Pers</button>`}</div>`;
+  $("#pstart", root)?.addEventListener("click", () => { P.started = true; save(); render(); });
+  $$("[data-ans]", root).forEach(b => (b.onclick = () => { const k = b.dataset.ans, t = q[k][+b.dataset.i]; answerPress(G, k, t); save(); toast(k === "pos" ? "Wartawan menyukai jawabanmu." : k === "neg" ? "Jawabanmu memancing reaksi." : "Jawaban dicatat."); render(); }));
+  $("#pleave", root)?.addEventListener("click", () => { if (!confirm("Tinggalkan konferensi pers sekarang? Media akan kecewa.")) return; finishPress(G, true); save(); render(); });
+  $("#pdone", root)?.addEventListener("click", () => go("portal", "ringkasan", {}, true));
+});
+
+// ============ KARIER: statistik keseluruhan ============
+export function careerStatsHtml(G) {
+  const u = G.user, p = userP(G), T = u.totals;
+  const club = userClub(G);
+  const row = (k, v) => `<div class="spread" style="padding:5px 0;border-top:1px solid var(--line);font-size:14px"><span>${k}</span><b>${v}</b></div>`;
+  const block = (title, t) => !t || !t.apps ? card(title, '<div class="muted">Belum ada laga.</div>') : card(title, row("Laga dimainkan", t.apps) + row("Menang", t.w) + row("Seri", t.d) + row("Kalah", t.l) + row("Persentase kemenangan", `${Math.round(t.w / t.apps * 100)}%`) + row("Gol tim / kebobolan", `${t.gf} / ${t.ga}`) + row("Gol", t.gls) + row("Assist", t.ast) + row("Pemain terbaik", t.pom) + row("Rata-rata rating", (t.rsum / t.apps).toFixed(2).replace(".", ",")) + row("Menit bermain", t.min.toLocaleString("id-ID")));
+  const moves = u.moves || [];
+  const fees = moves.filter(m => m.type !== "loan" && m.fee);
+  const promo = (u.history || []).filter(h => (h.notes || []).some(n => /promosi/i.test(n))).length, releg = (u.history || []).filter(h => (h.notes || []).some(n => /degradasi/i.test(n))).length;
+  const days = G.date - ((moves.filter(m => m.to === p.club).slice(-1)[0]?.date) ?? u.startDate);
+  const clubs = new Set([...(u.history || []).map(h => h.club), p.club]).size;
+  return block(`Klub saat ini · ${esc(club.name)}`, T?.club?.[p.club]) + block("Statistik Karier Keseluruhan", T?.all) + (T?.nt?.apps ? block("Tim Nasional", T.nt) : "") +
+    card("Perjalanan Karier", row("Jumlah klub", clubs) + row("Hari di klub saat ini", days) + row("Transfer berbayar", fees.length) + row("Total nilai transfer dirimu", fees.length ? moneyM(fees.reduce((s, m) => s + m.fee, 0)) : "-") + row("Transfer termahal", fees.length ? moneyM(Math.max(...fees.map(m => m.fee))) : "-") + row("Peminjaman", moves.filter(m => m.type === "loan").length) + row("Trofi", (u.trophies || []).length) + row("Penghargaan", (u.awards || []).length) + row("Promosi liga", promo) + row("Degradasi liga", releg) + row("Citra di media", esc(mediaWord(u.media || 0)))) +
+    `<p class="muted" style="font-size:12px;margin:0 4px 12px">Total menang/seri/kalah dihitung sejak versi ini; laga sebelumnya tetap tercatat di Riwayat Musim.</p>`;
+}

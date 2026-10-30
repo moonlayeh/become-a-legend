@@ -244,6 +244,13 @@ export function resolveDecision(G, mailId, idx, rng) {
     case "openNeg":
       msg = "Negosiasi dibuka.";
       break;
+    case "openPress":
+      msg = "Menuju ruang konferensi pers.";
+      break;
+    case "skipPress":
+      if (G.press && G.press.id === d.press) { G.press.done = true; G.user.media = Math.max(-100, (G.user.media || 0) - 4); }
+      msg = "Kamu menolak wawancara. Beberapa wartawan kecewa.";
+      break;
     case "rejectNeg":
       cancelNegotiation(G, rng, "Kamu menolak tawaran itu.");
       msg = "Tawaran ditolak.";

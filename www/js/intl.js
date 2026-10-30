@@ -133,7 +133,7 @@ export function afterIntlMatch(G, rng, match, score) {
   }
   const T = c.tour;
   if (!T) return;
-  const [gf, ga] = score;
+  let [gf, ga] = score;
   const nat = c.nat;
   if (T.stage === 0) {
     const row = T.group.find(r => r.n === nat), opp = T.group.find(r => r.n === match.opp);
