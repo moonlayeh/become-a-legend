@@ -4,7 +4,7 @@ import { fmt, ymd, HARI, BULAN } from "../calendar.js";
 import { userP, userClub } from "../world.js";
 import { continueGame } from "../sim.js";
 import { saveGame } from "../save.js";
-import { mailMeta, clubMatchDays, sessionsFor, SESS, SESS_COLOR } from "../meta.js";
+import { mailMeta, clubMatchDays, userMatchDays, sessionsFor, SESS, SESS_COLOR } from "../meta.js";
 import { fullName } from "../player.js";
 
 export const S = { G: null, sec: "portal", tab: "ringkasan", p: {}, screens: {}, drawer: false };
@@ -28,7 +28,7 @@ export const SECTIONS = {
   skuad: { label: "Skuad", tabs: [["utama", "Tim Utama"], ["muda", "Akademi U-19"]] },
   latihan: { label: "Latihan", tabs: [["individu", "Latihan Individu"], ["kalender", "Kalender Latihan"], ["medis", "Pusat Medis"]] },
   klub: { label: "Klub", tabs: [["ringkasan", "Ringkasan"], ["staf", "Staf"], ["sejarah", "Sejarah"]] },
-  kompetisi: { label: "Kompetisi", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["statistik", "Statistik"], ["sejarah", "Sejarah"]] },
+  kompetisi: { label: "Kompetisi", tabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["statistik", "Statistik"], ["sejarah", "Sejarah"]], compTabs: [["ringkasan", "Ringkasan"], ["jadwal", "Jadwal"], ["tahap", "Tahap"], ["sejarah", "Sejarah"]] },
   laga: { label: "Laga", tabs: [] },
 };
 const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"]];
@@ -36,29 +36,49 @@ const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skua
 export const save = () => S.G && saveGame(S.G);
 export function register(sec, tab, fn) { S.screens[sec + "/" + tab] = fn; }
 
+// Navigation keeps the reader's place: toggles inside the same screen (replace=true) keep the
+// scroll position, a new screen starts at the top, and "back" returns to where you were.
 export function go(sec, tab, p = {}, replace = false) {
-  S.sec = sec; S.tab = tab || SECTIONS[sec]?.tabs[0]?.[0] || ""; S.p = p;
+  tab = tab || SECTIONS[sec]?.tabs[0]?.[0] || "";
+  const same = sec === S.sec && tab === S.tab;
+  const keep = replace && same;
+  try { const cur = history.state; if (cur && !replace) history.replaceState({ ...cur, y: window.scrollY }, ""); } catch {}
+  S.sec = sec; S.tab = tab; S.p = p;
   const st = { sec: S.sec, tab: S.tab, p };
   try { replace ? history.replaceState(st, "") : history.pushState(st, ""); } catch {}
-  render();
-  window.scrollTo(0, 0);
+  if (keep) render();
+  else { render({ fresh: true }); window.scrollTo(0, 0); }
 }
 window.addEventListener("popstate", e => {
   if (!S.G) return;
   if ($(".live") || $(".sheet") || $(".proc")) return; // overlays handle their own close
   const st = e.state; if (!st) return;
-  S.sec = st.sec; S.tab = st.tab; S.p = st.p || {}; render();
+  S.sec = st.sec; S.tab = st.tab; S.p = st.p || {}; render({ fresh: true });
+  const y = st.y || 0;
+  requestAnimationFrame(() => window.scrollTo(0, y));
 });
+
+// remember horizontal scrollers (sub-tabs, chip rows, wide tables) across re-renders
+function scrollers() { return $$(".subtabs,.hscroll,.tscroll,.wscroll"); }
+function snapScroll(fresh) {
+  const y = window.scrollY;
+  const xs = scrollers().map(el => el.scrollLeft);
+  return () => {
+    const els = scrollers();
+    if (els.length === xs.length) els.forEach((el, i) => { if (!fresh || el.classList.contains("subtabs")) el.scrollLeft = xs[i]; });
+    if (!fresh) window.scrollTo(0, y);
+  };
+}
 
 function nextMatchText(G) {
   const u = userP(G);
-  const md = clubMatchDays(G, u.club);
+  const md = userMatchDays(G);
   let best = null;
   for (const [d, m] of md) if (d >= G.date && !m.res && (!best || d < best[0])) best = [d, m];
   if (G.camp) for (const mt of G.camp.matches) if (!mt.done && mt.d >= G.date && (!best || mt.d < best[0])) best = [mt.d, { opp: null, nt: mt.opp, ha: "" }];
   if (!best) return "Tidak ada pertandingan mendatang";
   const dd = best[0] - G.date;
-  const nm = best[1].nt ? G.camp && `Timnas vs ${best[1].nt}` : `${G.clubs[best[1].opp].short} (${best[1].ha})`;
+  const nm = best[1].nt ? G.camp && `Timnas vs ${best[1].nt}` : `${G.clubs[best[1].opp].short} (${best[1].ha}) · ${best[1].comp}`;
   return `${nm} ${dd === 0 ? "hari ini" : `dalam ${dd} hari`}`;
 }
 export function goLabel(G) {
@@ -68,8 +88,9 @@ export function goLabel(G) {
   return "Lanjutkan";
 }
 
-export function render() {
+export function render(opt = {}) {
   const G = S.G; if (!G) return;
+  const restore = snapScroll(!!opt.fresh);
   const u = userP(G), club = userClub(G);
   applyTheme(club.colors);
   const sec = SECTIONS[S.sec] || SECTIONS.portal;
@@ -77,7 +98,8 @@ export function render() {
   let secLabel = sec.label;
   if (S.sec === "pemain") secLabel = S.p.pid && S.p.pid !== u.id ? shortN(G.players[S.p.pid]) : "Profil Saya";
   if (S.sec === "klub") secLabel = (G.clubs[S.p.club] || club).short;
-  if (S.sec === "kompetisi") secLabel = G.leagues[S.p.league || club.league]?.short || "Kompetisi";
+  if (S.sec === "kompetisi") secLabel = S.p.comp ? (S.p.comp === "NL" ? "UNL" : G.comps[S.p.comp]?.short || "Kompetisi") : G.leagues[S.p.league || club.league]?.short || "Kompetisi";
+  const tabs = S.sec === "kompetisi" && S.p.comp ? sec.compTabs : sec.tabs;
   const app = $("#app");
   app.innerHTML = `
   <header class="topbar">
@@ -87,7 +109,7 @@ export function render() {
       <div class="datebox"><div class="d"><b>${HARI[wd].slice(0, 3).toUpperCase()} ${d}/${m}/${y}</b><span>${esc(nextMatchText(G))}</span></div></div>
       <button class="gobtn" id="go" ${G.user.retired ? "disabled" : ""}>${goLabel(G)} ${ICON.go}</button>
     </div>
-    ${sec.tabs.length ? `<div class="tb2"><div class="sec">${esc(secLabel)}</div><div class="subtabs" role="tablist">${sec.tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${l}</button>`).join("")}</div></div>` : ""}
+    ${tabs.length ? `<div class="tb2"><div class="sec">${esc(secLabel)}</div><div class="subtabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${l}</button>`).join("")}</div></div>` : ""}
   </header>
   <main class="page" id="page"></main>
   <div class="scrim" id="scrim" ${S.drawer ? "" : "hidden"}></div>
@@ -104,6 +126,10 @@ export function render() {
   $("#go").onclick = onGo;
   $$(".subtabs [data-tab]").forEach(b => (b.onclick = () => go(S.sec, b.dataset.tab, S.p)));
   $$("#drawer [data-nav]").forEach(b => (b.onclick = () => { S.drawer = false; go(b.dataset.nav, null, {}); }));
+  restore();
+  // keep the selected sub-tab in view
+  const on = $('.subtabs [aria-selected="true"]');
+  if (on && opt.fresh) { const bar = on.parentElement; if (on.offsetLeft < bar.scrollLeft || on.offsetLeft + on.offsetWidth > bar.scrollLeft + bar.clientWidth) bar.scrollLeft = on.offsetLeft - 16; }
 }
 function closeDrawer() { S.drawer = false; $("#drawer")?.classList.remove("open"); const s = $("#scrim"); if (s) s.hidden = true; }
 const shortN = p => (p ? `${p.fn[0]}. ${p.ln}` : "Pemain");
@@ -163,7 +189,7 @@ function processing() {
 function paintProc(G, el, startMail) {
   const { d, m, wd } = ymd(G.date);
   const u = userP(G);
-  const md = clubMatchDays(G, u.club);
+  const md = userMatchDays(G);
   let next = null; for (const [dd, x] of md) if (dd >= G.date && !x.res && (!next || dd < next[0])) next = [dd, x];
   const mails = G.inbox.slice(0, 5);
   const news = G.news[0];

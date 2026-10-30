@@ -70,11 +70,13 @@ export function flagBadge(nat, size = 28) {
   const n = NATIONS[nat];
   return `<span class="flagb" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.62)}px" title="${esc(n?.name || nat)}">${flagEmoji(nat)}</span>`;
 }
-const ISO = { IDN: "ID", ESP: "ES", FRA: "FR", GER: "DE", ITA: "IT", POR: "PT", NED: "NL", BEL: "BE", CRO: "HR", DEN: "DK", BRA: "BR", ARG: "AR", URU: "UY", COL: "CO", MAR: "MA", SEN: "SN", CIV: "CI", NGA: "NG", JPN: "JP", KOR: "KR", USA: "US", VIE: "VN", THA: "TH", MAS: "MY", SGP: "SG", PHI: "PH", KSA: "SA", IRN: "IR", AUS: "AU", QAT: "QA", IRQ: "IQ", UZB: "UZ", JOR: "JO", CHN: "CN", SUI: "CH", AUT: "AT", POL: "PL", NOR: "NO", SWE: "SE", SRB: "RS", TUR: "TR", UKR: "UA", CZE: "CZ", GRE: "GR", MEX: "MX", CAN: "CA", ECU: "EC", PAR: "PY", CHI: "CL", EGY: "EG", ALG: "DZ", TUN: "TN", CMR: "CM", GHA: "GH", MLI: "ML" };
+const ISO = new Proxy({}, { get: (_, k) => NATIONS[k]?.iso2 });
 export function flagEmoji(nat) {
   if (nat === "ENG") return "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
   if (nat === "SCO") return "🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
-  const iso = ISO[nat]; if (!iso) return "🏳";
+  if (nat === "WAL") return "🏴\u{E0067}\u{E0062}\u{E0077}\u{E006C}\u{E0073}\u{E007F}";
+  if (nat === "NIR") return "🇬🇧";
+  const iso = ISO[nat]; if (!iso || iso.length !== 2) return "🏳";
   return String.fromCodePoint(...[...iso].map(c => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 export const natTag = nat => `<span class="nat">${flagEmoji(nat)} ${esc(nat)}</span>`;

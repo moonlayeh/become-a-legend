@@ -119,13 +119,16 @@ export function personality(p) {
   return "Seimbang";
 }
 
-const LEAGUE_PAY = { ENG1: 1.25, ESP1: 1, ITA1: 0.95, GER1: 1, FRA1: 0.85, IDN1: 0.12 };
+// relative wage level per league (Premier League highest)
+const LEAGUE_PAY = { ENG1: 1.25, ESP1: 1, ITA1: 0.95, GER1: 1, FRA1: 0.85, ENG2: 0.6, ESP2: 0.35, ITA2: 0.35, GER2: 0.45, FRA2: 0.3, POR1: 0.45, NED1: 0.5, BEL1: 0.45, KSA1: 1.1, USA1: 0.6, BRA1: 0.45, ARG1: 0.25, JPN1: 0.4, MAS1: 0.15, THA1: 0.15, RSA1: 0.18, EGY1: 0.2, MAR1: 0.18, IDN1: 0.12, IDN2: 0.05 };
+// transfer-market level per league
+const LEAGUE_VALUE = { IDN1: 0.35, IDN2: 0.2, MAS1: 0.35, THA1: 0.4, RSA1: 0.5, EGY1: 0.5, MAR1: 0.5, ARG1: 0.8, BRA1: 0.85, USA1: 0.8, JPN1: 0.75, KSA1: 0.9, ENG2: 0.9 };
 export function marketValue(p, today, leagueId) {
   const age = ageOn(p.birth, today);
   let v = 0.002 * Math.exp(0.065 * p.ca); // € juta
   if (age <= 23) v *= 1 + Math.max(0, p.pa - p.ca) / 120 * (24 - age) / 6;
   if (age >= 29) v *= Math.max(0.15, 1 - (age - 28) * 0.13);
-  v *= leagueId === "IDN1" ? 0.35 : 1;
+  v *= LEAGUE_VALUE[leagueId] ?? 1;
   return Math.max(0.01, v);
 }
 export function fairWage(p, leagueId) { // € per minggu

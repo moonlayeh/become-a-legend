@@ -1,7 +1,8 @@
 // Derived, read-only data for the interface: roles, reputation, words for numbers,
 // training schedules, staff, message senders, club profiles.
 import { RNG, clamp } from "./rng.js";
-import { NATIONS, NAMES, LEAGUES } from "./data.js";
+import { NATIONS, NAMES, LEAGUES, PROMO, POOL_DROP } from "./data.js";
+import { CONTINENTAL, PLAYOFFS } from "./compdata.js";
 import { A, WEIGHTS, ATTRS, abilityFor } from "./attributes.js";
 import { ymd, ageOn, day, seasonOf } from "./calendar.js";
 import { INTL_WINDOWS } from "./world.js";
@@ -62,10 +63,10 @@ export const PITCH_XY = { GK: [50, 93], DR: [86, 77], DC: [50, 79], DL: [14, 77]
 // ---------- words ----------
 export const reputation = (G, p) => {
   const lg = G.clubs[p.club]?.league;
-  const s = p.ca + (lg === "IDN1" ? -15 : lg ? 6 : 0) + Math.min(20, (p.caps || 0) * 0.4) + ((p.isUser ? G.user.awards.length : 0) * 4);
+  const s = p.ca + (["IDN1", "IDN2", "MAS1", "THA1"].includes(lg) ? -15 : lg ? 6 : 0) + Math.min(20, (p.caps || 0) * 0.4) + ((p.isUser ? G.user.awards.length : 0) * 4);
   return s >= 165 ? "Seluruh Dunia" : s >= 148 ? "Kontinental" : s >= 128 ? "Nasional" : s >= 100 ? "Regional" : "Lokal";
 };
-export const clubReputation = c => { const v = c.level + (c.league === "IDN1" || c.nation === "IDN" ? 38 : 0); return v >= 158 ? "Seluruh Dunia" : v >= 142 ? "Kontinental" : v >= 118 ? "Nasional" : v >= 100 ? "Regional" : "Lokal"; };
+export const clubReputation = c => { const v = c.level + (["IDN", "MAS", "THA", "BRN"].includes(c.nation) ? 38 : ["ZAF", "EGY", "MAR", "KSA"].includes(c.nation) ? 18 : 0); return v >= 158 ? "Seluruh Dunia" : v >= 142 ? "Kontinental" : v >= 118 ? "Nasional" : v >= 100 ? "Regional" : "Lokal"; };
 export const REP_COLOR = { "Seluruh Dunia": "#7ad36b", Kontinental: "#a6d84f", Nasional: "#e6d34a", Regional: "#e8a23c", Lokal: "#b9b9b9" };
 export const footWord = v => (v >= 18 ? "Sangat Kuat" : v >= 15 ? "Kuat" : v >= 12 ? "Sedang" : v >= 9 ? "Cukup" : v >= 5 ? "Lemah" : "Sangat Lemah");
 export const footLevel = v => clamp(Math.round(v / 20 * 6), 1, 6);
@@ -118,7 +119,7 @@ export function staffOf(G, clubId) {
   const c = G.clubs[clubId]; const r = new RNG(hash("staff" + clubId));
   const out = [];
   for (const [role, n, a0, a1] of STAFF_ROLES) for (let i = 0; i < n; i++) {
-    const nat = r.chance(0.72) ? c.nation : r.pick(Object.keys(NATIONS).filter(k => !NATIONS[k].opp));
+    const nat = r.chance(0.72) ? c.nation : r.pick(Object.keys(NATIONS).filter(k => NATIONS[k].level >= 110));
     const pool = NAMES[NATIONS[nat].lang];
     out.push({ role, name: `${r.pick(pool.first)} ${r.pick(pool.last)}`, nat, age: r.int(a0, a1), until: seasonOf(G.date) + r.int(1, 4) });
   }
@@ -169,11 +170,50 @@ export const SESS = {
 };
 const WEEK = [["fisR", "gop", "gar"], ["fis", "ser", "pre"], ["fisB", "pel", "jeb"], ["fisB", "bmb", "btm"], ["lbm", "lbb", "lpb"], ["fisB", "ind", "ind"], ["pul", "ist", "ist"]];
 const SEASON_WEEK = [["fisR", "gop", "lpb"], ["fis", "ser", "pel"], ["ind", "bmb", "btm"], ["fisR", "lbm", "pre"], ["fisR", "mat", "bmt"], ["fis", "ind", "lpb"], ["pul", "ist", "ist"]];
-export function clubMatchDays(G, clubId) {
+// all fixtures of a club: league, play-offs, cups and continental games (youth = U-19 competitions)
+export function clubMatchDays(G, clubId, youth = false) {
   const c = G.clubs[clubId]; const L = c && G.leagues[c.league];
   const out = new Map();
-  if (L) for (const f of L.fixtures) if (f.h === clubId || f.a === clubId) out.set(f.d, { opp: f.h === clubId ? f.a : f.h, ha: f.h === clubId ? "K" : "T", comp: L.short, compName: L.name, res: f.res ? (f.h === clubId ? f.res : [f.res[1], f.res[0]]) : null, f });
+  const put = (f, comp, compName, src) => out.set(f.d, { opp: f.h === clubId ? f.a : f.h, ha: f.neutral ? "N" : f.h === clubId ? "K" : "T", comp, compName, res: f.res ? (f.h === clubId ? f.res : [f.res[1], f.res[0]]) : null, f, src });
+  if (L && !youth) for (const f of L.fixtures) if (f.h === clubId || f.a === clubId) put(f, L.short, L.name, L.id);
+  for (const cp of Object.values(G.comps || {})) {
+    if (!!cp.youth !== youth) continue;
+    for (const f of cp.fixtures) if (f.h === clubId || f.a === clubId) {
+      const S = cp.stages[f.st];
+      put(f, cp.short, `${cp.name}${S ? " · " + (S.type === "groups" ? `Grup ${String.fromCharCode(65 + f.g)}` : S.type === "league" && S.names ? S.names[f.g] : S.name) : ""}`, cp.id);
+    }
+  }
   return out;
+}
+// the user's calendar: academy players also see their U-19 competition games
+export function userMatchDays(G) {
+  const u = G.players[G.user.pid];
+  const md = clubMatchDays(G, u.club);
+  if (u.squad === "Y") for (const [d, m] of clubMatchDays(G, u.club, true)) if (!md.has(d)) md.set(d, { ...m, youth: true, comp: m.comp + " U-19" });
+  return md;
+}
+// table zones: continental places, promotion, play-offs, relegation → [{n, cls, label}] from the top and from the bottom
+export function leagueZones(G, lid) {
+  const L = G.leagues[lid]; if (!L) return { top: [], bottom: [] };
+  const top = [], bottom = [];
+  if (PLAYOFFS[lid]) top.push({ n: 8, cls: "zc", label: "Fase gugur" });
+  else {
+    for (const def of CONTINENTAL) { const n = def.slots?.[lid]; if (n) top.push({ n, cls: top.length ? "ze" : "zt", label: def.short }); }
+    const up = PROMO.find(p => p.down === lid);
+    if (up && up.mode !== "zones") { top.push({ n: up.n - 1, cls: "zp", label: "Promosi" }); top.push({ n: up.mode === "po" ? 4 : 1, cls: "zo", label: "Play-off" }); }
+    if (up && up.mode === "zones") { top.push({ n: 1, cls: "zp", label: "Promosi" }); top.push({ n: 1, cls: "zo", label: "Play-off" }); }
+  }
+  const down = PROMO.find(p => p.up === lid);
+  if (down) { if (down.mode === "rpo") { bottom.push({ n: 1, cls: "zo", label: "Play-off" }); bottom.push({ n: down.n - 1, cls: "zr", label: "Degradasi" }); } else bottom.push({ n: down.n, cls: "zr", label: "Degradasi" }); }
+  if (POOL_DROP[lid]) { if (L.zones) { bottom.push({ n: 1, cls: "zo", label: "Play-off" }); bottom.push({ n: 1, cls: "zr", label: "Degradasi" }); } else bottom.push({ n: POOL_DROP[lid], cls: "zr", label: "Degradasi" }); }
+  return { top, bottom };
+}
+export function zoneOf(z, i, n) {
+  let k = 0;
+  for (const t of z.top) { if (i < k + t.n) return t.cls; k += t.n; }
+  k = 0;
+  for (const b of z.bottom.slice().reverse()) { if (i >= n - k - b.n) return b.cls; k += b.n; }
+  return "";
 }
 export function sessionsFor(G, clubId, n, md = clubMatchDays(G, clubId)) {
   const { m, d, wd } = ymd(n);

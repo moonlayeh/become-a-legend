@@ -7,28 +7,40 @@ import { userP, userClub, table } from "../world.js";
 import { fullName, shortName } from "../player.js";
 import { squadStatus, resolveDecision, coachReport, fed } from "../career.js";
 import { rngOf } from "../sim.js";
-import { mailMeta, CAT_COLOR, clubMatchDays, sessionsFor, SESS, SESS_COLOR, calendarEvents, fitnessWord, moraleWord, moraleFace, facilities, clubReputation, REP_COLOR, staffOf, predictedFinish } from "../meta.js";
+import { mailMeta, CAT_COLOR, clubMatchDays, userMatchDays, leagueZones, zoneOf, sessionsFor, SESS, SESS_COLOR, calendarEvents, fitnessWord, moraleWord, moraleFace, facilities, clubReputation, REP_COLOR, staffOf, predictedFinish } from "../meta.js";
+import { compLabel } from "../comps.js";
+import { CUPS, CONTINENTAL } from "../compdata.js";
+import { leagueSeasonLabel } from "../world.js";
 
 const avgR = st => (st.rn ? st.rsum / st.rn : null);
 const wd3 = n => HARI[ymd(n).wd].slice(0, 3);
 
 // ---------- shared bits ----------
 export function miniTable(G, lid, opts = {}) {
-  const L = G.leagues[lid]; const tb = table(G, lid); const u = userP(G);
+  const L = G.leagues[lid]; const u = userP(G);
+  if (L.zones && opts.zone == null) {
+    const z = L.zones.map((name, k) => `<div class="lbl" style="margin:${k ? 12 : 0}px 0 4px">${esc(name)}</div>` + miniTable(G, lid, { ...opts, zone: k, noLegend: k === 0 }));
+    return z.join("");
+  }
+  const tb = table(G, lid, opts.zone ?? null);
+  const Z = leagueZones(G, lid);
   let rows = tb.map((r, i) => [r, i]);
   if (opts.around) { const me = tb.findIndex(r => r.id === u.club); const a = Math.max(0, Math.min(tb.length - opts.around, me - Math.floor(opts.around / 2))); rows = rows.slice(a, a + opts.around); }
   else if (opts.top) rows = rows.slice(0, opts.top);
-  const zone = i => (i < (lid === "IDN1" ? 1 : 4) ? "zt" : i < (lid === "IDN1" ? 2 : 6) ? "ze" : i >= tb.length - L.relegate ? "zr" : "");
+  const zone = i => zoneOf(Z, i, tb.length);
+  const legend = [...Z.top, ...Z.bottom].filter((x, i, a) => a.findIndex(y => y.label === x.label) === i);
   return `<table class="tbl"><thead><tr><th>Pos</th><th>Tim</th><th class="n">Main</th>${opts.full ? '<th class="n">M</th><th class="n">S</th><th class="n">K</th>' : ""}<th class="n">SG</th><th class="n">Pts</th></tr></thead><tbody>
     ${rows.map(([r, i]) => `<tr class="${r.id === u.club ? "me" : ""} click" data-club="${r.id}"><td class="${zone(i)}">${i + 1}</td><td><span class="row" style="gap:6px">${crest(G.clubs[r.id], 18)}<span>${esc(opts.full ? G.clubs[r.id].name : G.clubs[r.id].short.length > 4 ? G.clubs[r.id].short : shortClub(G.clubs[r.id]))}</span></span></td><td class="n">${r.p}</td>${opts.full ? `<td class="n">${r.w}</td><td class="n">${r.d}</td><td class="n">${r.l}</td>` : ""}<td class="n">${r.gf - r.ga}</td><td class="n"><b>${r.pts}</b></td></tr>`).join("")}
-  </tbody></table><div class="legend"><span><i style="background:var(--blue)"></i>${lid === "IDN1" ? "Juara" : "UCL"}</span><span><i style="background:#c9a227"></i>${lid === "IDN1" ? "Asia" : "UEL"}</span><span><i style="background:var(--bad)"></i>Degr.</span></div>`;
+  </tbody></table>${opts.noLegend || !legend.length ? "" : `<div class="legend">${legend.map(x => `<span><i class="${x.cls}" style="background:${ZC[x.cls]}"></i>${esc(x.label)}</span>`).join("")}</div>`}`;
 }
+const ZC = { zt: "var(--blue)", ze: "#c9a227", zr: "var(--bad)", zp: "#2fbf71", zo: "#e8873a", zc: "#2bb3c0" };
 export const shortClub = c => c.name.replace(/^(FC|AC|AS|RC|CA|SC|RCD|UD|CF|AJ|OGC|LOSC|SV|VfL|VfB|TSG|1\. FC|1\. FSV|RB|SS|US|Real|Stade|Olympique|Borussia)\s/, "").replace(/ (FC|CF|United|City|Hotspur|Calcio)$/, m => (m === " United" ? " Utd" : m === " City" ? " City" : "")).slice(0, 16);
 
 function newsArt(G, n, size = 60) {
   const c = n.club && G.clubs[n.club];
   if (c) return crest(c, size);
   if (n.league && G.leagues[n.league]) return compBadge(G.leagues[n.league], size);
+  if (n.comp && G.comps[n.comp]) return compBadge(G.comps[n.comp], size);
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-opacity=".7" stroke-width="1.5"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>`;
 }
 export function newsCard(G, n) {
@@ -48,7 +60,7 @@ function msgItem(G, m, cur) {
 // ---------- RINGKASAN ----------
 register("portal", "ringkasan", (G, root) => {
   const u = userP(G), club = userClub(G), L = G.leagues[club.league];
-  const md = clubMatchDays(G, club.id);
+  const md = userMatchDays(G);
   const upcoming = [...md].filter(([d, m]) => !m.res && d >= G.date).sort((a, b) => a[0] - b[0]);
   const played = [...md].filter(([d, m]) => m.res).sort((a, b) => b[0] - a[0]);
   const next = upcoming[0];
@@ -58,11 +70,11 @@ register("portal", "ringkasan", (G, root) => {
   // opponent report
   let opp = "";
   if (next) {
-    const oc = G.clubs[next[1].opp], tb = table(G, oc.league), pos = tb.findIndex(r => r.id === oc.id) + 1;
-    const form = tb.find(r => r.id === oc.id).form.slice(-5);
+    const oc = G.clubs[next[1].opp], OL = G.leagues[oc.league], tb = OL ? table(G, oc.league) : [], pos = tb.findIndex(r => r.id === oc.id) + 1;
+    const form = tb.find(r => r.id === oc.id)?.form.slice(-5) || [];
     const key = oc.squad.map(id => G.players[id]).filter(Boolean).sort((a, b) => b.ca - a.ca)[0];
     opp = `<div class="card"><div class="ch">Laporan Lawan Berikutnya</div>
-      <div class="row">${crest(oc, 46)}<div style="min-width:0"><b style="font-size:17px" class="click" data-club="${oc.id}">${esc(oc.name)} (${next[1].ha})</b> <span class="muted">· ${next[0] - G.date === 0 ? "hari ini" : `dalam ${next[0] - G.date} hari`}</span><div class="muted" style="font-size:13.5px">ke-${pos} di ${esc(G.leagues[oc.league].name)}</div></div></div>
+      <div class="row">${crest(oc, 46)}<div style="min-width:0"><b style="font-size:17px" class="click" data-club="${oc.id}">${esc(oc.name)} (${next[1].ha})</b> <span class="muted">· ${next[0] - G.date === 0 ? "hari ini" : `dalam ${next[0] - G.date} hari`}</span><div class="muted" style="font-size:13.5px">${OL ? `ke-${pos} di ${esc(OL.name)}` : `${flagEmoji(oc.nation)} ${esc(NATIONS[oc.nation]?.name || "")}`} · ${esc(next[1].compName)}</div></div></div>
       <div class="grid2" style="margin-top:10px;font-size:13.5px"><div><div class="lbl">Performa</div>${form.length ? form.map(f => `<span class="tag" style="border-color:${f === "M" ? "var(--good)" : f === "K" ? "var(--bad)" : "#888"};margin-right:2px">${f}</span>`).join("") : "Tidak ada data"}</div><div><div class="lbl">Formasi paling sering</div>◆ ${oc.formation}</div></div>
       ${key ? `<div style="margin-top:8px;font-size:13.5px"><span class="lbl">Pemain kunci:</span> <a class="click" data-pid="${key.id}"><b>${esc(fullName(key))}</b></a> <span class="muted">(${key.main})</span></div>` : ""}</div>`;
   }
@@ -88,9 +100,9 @@ register("portal", "ringkasan", (G, root) => {
   <div class="card">${heading("Berita", true)}${news[0] ? newsCard(G, news[0]) : '<div class="empty">Belum ada berita.</div>'}${news.slice(1).map(n => newsRow(G, n)).join("")}</div>
   <div class="card">${heading("Jadwal Pertandingan", true)}
     <table class="tbl"><thead><tr><th>Tanggal</th><th>Klub</th><th class="c">Tempat</th><th class="c">Hasil</th><th>Komp.</th></tr></thead><tbody>
-    ${[...played.slice(0, 2).reverse(), ...upcoming.slice(0, 7)].map(([d, m]) => `<tr class="click" data-club="${m.opp}"><td>${shortDay(d)}</td><td><span class="row" style="gap:6px">${crest(G.clubs[m.opp], 18)}${esc(shortClub(G.clubs[m.opp]))}</span></td><td class="c">${m.ha}</td><td class="c">${m.res ? `<span class="tag" style="border-color:${m.res[0] > m.res[1] ? "var(--good)" : m.res[0] < m.res[1] ? "var(--bad)" : "#888"}">${m.res[0]}-${m.res[1]}</span>` : "-"}</td><td>${esc(m.comp)}</td></tr>`).join("")}
+    ${[...played.slice(0, 2).reverse(), ...upcoming.slice(0, 7)].map(([d, m]) => `<tr class="click" data-club="${m.opp}" title="${esc(m.compName)}"><td>${shortDay(d)}</td><td><span class="row" style="gap:6px">${crest(G.clubs[m.opp], 18)}${esc(shortClub(G.clubs[m.opp]))}</span></td><td class="c">${m.ha}</td><td class="c">${m.res ? `<span class="tag" style="border-color:${m.res[0] > m.res[1] ? "var(--good)" : m.res[0] < m.res[1] ? "var(--bad)" : "#888"}">${m.res[0]}-${m.res[1]}</span>` : "-"}</td><td>${esc(m.comp)}</td></tr>`).join("")}
     </tbody></table></div>
-  <div class="card"><div class="spread"><div class="ch" style="margin:0">${heading("Kompetisi", true).replace('class="ch link"', 'class="ch link" style="margin:0"')}</div><button class="btn sm ghost" data-league="${club.league}">${esc(L.name)}</button></div><div style="margin-top:8px">${miniTable(G, club.league, { around: 7 })}</div></div>
+  ${L ? `<div class="card"><div class="spread"><div class="ch" style="margin:0">${heading("Kompetisi", true).replace('class="ch link"', 'class="ch link" style="margin:0"')}</div><button class="btn sm ghost" data-league="${club.league}">${esc(L.name)}</button></div><div style="margin-top:8px">${miniTable(G, club.league, { around: 7, zone: L.zones ? club.zone : undefined })}</div></div>` : ""}
   <div class="card click" data-go="latihan/kalender"><div class="ch">Latihan</div>${wk}</div>`;
   $$("[data-mail]", root).forEach(el => (el.onclick = () => go("portal", "pesan", { mail: +el.dataset.mail })));
 });
@@ -150,7 +162,7 @@ register("portal", "kalender", (G, root, p) => {
   const mode = p.mode || "umum";
   const { y, m } = ymd(G.date);
   const cy = p.y ?? y, cm = p.m ?? m;
-  const u = userP(G), club = userClub(G), md = clubMatchDays(G, club.id);
+  const u = userP(G), club = userClub(G), md = userMatchDays(G);
   const head = `<div class="card"><div class="seg" style="margin-bottom:10px"><button data-mode="umum" aria-pressed="${mode === "umum"}">Umum</button><button data-mode="latihan" aria-pressed="${mode === "latihan"}">Latihan</button><button data-mode="jadwal" aria-pressed="${mode === "jadwal"}">Jadwal Pertandingan</button></div>`;
   let body = "";
   if (mode === "umum") {
@@ -192,8 +204,8 @@ register("portal", "kalender", (G, root, p) => {
       const rev = [...md].find(([d, x]) => x.opp === sx.opp && d !== sel);
       det = `<div class="card" style="background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(0,0,0,.1))"><div class="muted" style="text-align:center;font-size:13px">${fmtDay(sel)} · ${esc(sx.compName)}</div>
         <div class="row" style="justify-content:center;gap:10px;margin:8px 0"><b class="disp" style="font-size:20px">${esc(shortClub(H))}</b>${crest(H, 30)}<b class="disp" style="font-size:22px">${sx.res ? `${sx.ha === "K" ? sx.res[0] : sx.res[1]} - ${sx.ha === "K" ? sx.res[1] : sx.res[0]}` : "15:00"}</b>${crest(A2, 30)}<b class="disp" style="font-size:20px">${esc(shortClub(A2))}</b></div>
-        <div class="muted" style="text-align:center;font-size:13px">Kandang ${esc(H.name)}</div>
-        ${[club, oc].map(c => `<div class="ch" style="font-size:14px;margin-top:12px">Berita tim ${esc(c.short)}</div>${inj(c).map(q => `<div style="font-size:13.5px">➕ <a class="click" data-pid="${q.id}">${esc(fullName(q))}</a> absen (${esc(q.injury.name.toLowerCase())})</div>`).join("") || '<div class="muted" style="font-size:13.5px">Tidak ada kabar tim</div>'}`).join("")}
+        <div class="muted" style="text-align:center;font-size:13px">${sx.ha === "N" ? "Stadion netral" : `Kandang ${esc(H.name)}`}</div>
+        ${[club, oc].filter(Boolean).map(c => `<div class="ch" style="font-size:14px;margin-top:12px">Berita tim ${esc(c.short)}</div>${inj(c).map(q => `<div style="font-size:13.5px">➕ <a class="click" data-pid="${q.id}">${esc(fullName(q))}</a> absen (${esc(q.injury.name.toLowerCase())})</div>`).join("") || '<div class="muted" style="font-size:13.5px">Tidak ada kabar tim</div>'}`).join("")}
         <div class="ch" style="font-size:14px;margin-top:12px">Pertemuan sebelumnya</div><div class="muted" style="font-size:13.5px">${rev && rev[1].res ? `${fmt(rev[0])}: ${rev[1].ha === "K" ? `${club.short} ${rev[1].res[0]}-${rev[1].res[1]} ${oc.short}` : `${oc.short} ${rev[1].res[1]}-${rev[1].res[0]} ${club.short}`}` : "Belum ada pertandingan yang dimainkan."}</div></div>`;
     }
     body = `${det}<div class="tscroll"><table class="tbl"><thead><tr><th>Tanggal</th><th>Lawan</th><th class="c">Tempat</th><th class="c">Hasil</th><th>Kompetisi</th></tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -221,28 +233,50 @@ register("portal", "berita", (G, root, p) => {
   }
   // today's top fixtures
   const today = [];
-  for (const L of Object.values(G.leagues)) for (const f of L.fixtures) if (f.d >= G.date && f.d <= G.date + 3 && today.length < 8) today.push([L, f]);
-  today.sort((a, b) => a[1].d - b[1].d || G.clubs[b[1].h].level - G.clubs[a[1].h].level);
+  for (const L of [...Object.values(G.leagues), ...Object.values(G.comps).filter(c => !c.youth)]) for (const f of L.fixtures) if (f.d >= G.date && f.d <= G.date + 3) today.push([L, f]);
+  today.sort((a, b) => a[1].d - b[1].d || (G.clubs[b[1].h].level + G.clubs[b[1].a].level) - (G.clubs[a[1].h].level + G.clubs[a[1].a].level));
+  today.length = Math.min(today.length, 10);
   const me = G.news.filter(n => n.scope === "me"), world = G.news.filter(n => n.scope === "world"), trf = G.news.filter(n => n.scope === "transfer" || n.tag === "Transfer" || n.tag === "Rumor Transfer");
   const sec = (t, arr) => `<div class="card">${heading(t, true)}${arr[0] ? newsCard(G, arr[0]) : '<div class="empty">Belum ada berita.</div>'}${arr.length > 1 ? `<div style="margin-top:6px">${arr.slice(1, 7).map(n => newsRow(G, n)).join("")}</div>` : ""}</div>`;
   root.innerHTML = `<h2 class="disp" style="font-size:26px;margin:4px 2px 8px">Beranda Berita</h2>
-    ${today.length ? `<div class="lbl" style="margin:0 2px 6px">Jadwal pertandingan teratas</div><div class="fxs">${today.map(([L, f]) => `<div class="fx click" data-league="${L.id}"><div class="h"><span>${esc(L.short)}</span><span>${f.res ? "Selesai" : shortDay(f.d)}</span></div><div class="tm">${crest(G.clubs[f.h], 18)}<span>${esc(shortClub(G.clubs[f.h]))}</span><b>${f.res ? f.res[0] : ""}</b></div><div class="tm">${crest(G.clubs[f.a], 18)}<span>${esc(shortClub(G.clubs[f.a]))}</span><b>${f.res ? f.res[1] : ""}</b></div></div>`).join("")}</div>` : ""}
+    ${today.length ? `<div class="lbl" style="margin:0 2px 6px">Jadwal pertandingan teratas</div><div class="fxs">${today.map(([L, f]) => `<div class="fx click" ${L.kind ? `data-go="kompetisi/ringkasan" data-p='${JSON.stringify({ comp: L.id })}'` : `data-league="${L.id}"`}><div class="h"><span>${esc(L.short)}</span><span>${f.res ? "Selesai" : shortDay(f.d)}</span></div><div class="tm">${crest(G.clubs[f.h], 18)}<span>${esc(shortClub(G.clubs[f.h]))}</span><b>${f.res ? f.res[0] : ""}</b></div><div class="tm">${crest(G.clubs[f.a], 18)}<span>${esc(shortClub(G.clubs[f.a]))}</span><b>${f.res ? f.res[1] : ""}</b></div></div>`).join("")}</div>` : ""}
     ${sec("Untukmu", me)}${sec("Di Sekitar Dunia", world)}${sec("Ringkasan Transfer", trf)}
-    <div class="card">${heading("Pusat Kompetisi", true)}<div class="row" style="margin-bottom:6px">${compBadge(G.leagues[userClub(G).league], 28)}<b class="click" data-league="${userClub(G).league}">${esc(G.leagues[userClub(G).league].name)}</b></div>${miniTable(G, userClub(G).league, { top: 8 })}</div>`;
+    ${G.leagues[userClub(G).league] ? `<div class="card">${heading("Pusat Kompetisi", true)}<div class="row" style="margin-bottom:6px">${compBadge(G.leagues[userClub(G).league], 28)}<b class="click" data-league="${userClub(G).league}">${esc(G.leagues[userClub(G).league].name)}</b></div>${miniTable(G, userClub(G).league, { top: 8, zone: G.leagues[userClub(G).league].zones ? userClub(G).zone : undefined })}</div>` : ""}`;
 });
 
 // ---------- KOMPETISI (overview) ----------
+// status line for a cup / continental competition
+export function compStatus(G, c) {
+  if (!c) return "";
+  if (c.state === "done") return `Juara: ${G.clubs[c.winner]?.short || "-"}`;
+  const S = c.stages[c.cur ?? 0];
+  if (!S) return "";
+  const next = c.fixtures.filter(f => !f.res).sort((a, b) => a.d - b.d)[0];
+  return `${S.name}${next ? ` · ${fmt(next.d)}` : ""}`;
+}
+function userComps(G) {
+  const u = userP(G);
+  const ids = new Set();
+  for (const c of Object.values(G.comps)) if (c.kind !== "po" && c.teams.includes(u.club) && (!c.youth || u.squad === "Y")) ids.add(c.id);
+  return [...ids].map(id => G.comps[id]);
+}
+const crow = (G, badge, name, sub, right, attrs) => `<div class="crow click" ${attrs}>${badge}<div class="cn"><b>${esc(name)}</b><span>${sub}</span></div><div class="cr">${right}</div></div>`;
 register("portal", "kompetisi", (G, root) => {
-  const club = userClub(G);
-  const order = [club.league, ...Object.keys(G.leagues).filter(k => k !== club.league)];
-  root.innerHTML = order.map(lid => {
-    const L = G.leagues[lid];
-    const champ = L.history[L.history.length - 1];
-    const players = L.teams.flatMap(id => G.clubs[id].squad.map(pid => G.players[pid])).filter(q => q && q.st.rn >= 3);
-    const best = players.sort((a, b) => b.st.rsum / b.st.rn - a.st.rsum / a.st.rn)[0];
-    return `<div class="card flush" style="border-top:3px solid ${L.color}"><div class="row click" data-league="${lid}" style="padding:12px;background:linear-gradient(90deg,${L.color}66,transparent)">${compBadge(L, 38)}<div><b style="font-size:19px">${esc(L.name)}</b><div class="muted" style="font-size:13px">${flagEmoji(L.nation)} ${esc(NATIONS[L.nation].name)}</div></div></div>
-      <div style="padding:0 12px"><div class="spread" style="padding:8px 0;border-bottom:1px solid var(--line);font-size:14px"><b>Juara Bertahan</b><span>${champ ? `${crest(G.clubs[champ.champion], 16).replace("<svg", '<svg style="display:inline;vertical-align:-3px;margin-right:4px"')}${esc(G.clubs[champ.champion].short)}` : "-"}</span></div>
-      <div class="spread" style="padding:8px 0;font-size:14px"><b>Nilai Rata-Rata Tertinggi</b><span>${best ? `<a class="click" data-pid="${best.id}">${esc(shortName(best))}</a> ${pill(best.st.rsum / best.st.rn)}` : "-"}</span></div>
-      ${miniTable(G, lid, lid === club.league ? { top: 20 } : { top: 6 })}<div style="height:10px"></div></div></div>`;
-  }).join("");
+  const club = userClub(G), u = userP(G);
+  const L0 = G.leagues[club.league];
+  const lgRow = L => { const last = L.history[L.history.length - 1], tb = table(G, L.id); const lead = tb[0]?.p ? `Puncak: ${esc(G.clubs[tb[0].id].short)} ${tb[0].pts}` : last ? `Juara: ${esc(G.clubs[last.champion].short)}` : ""; return crow(G, compBadge(L, 32), L.name, `${flagEmoji(L.nation)} ${esc(NATIONS[L.nation].name)} · ${L.tier === 2 ? "Divisi 2" : "Divisi 1"} · ${esc(leagueSeasonLabel(L))}`, lead, `data-league="${L.id}"`); };
+  const cRow = c => crow(G, compBadge(c, 32), c.name, `${c.nation ? `${flagEmoji(c.nation)} ` : ""}${esc(compLabel(c))}${c.youth ? " · U-19" : ""}`, esc(compStatus(G, c)), `data-go="kompetisi/ringkasan" data-p='${JSON.stringify({ comp: c.id })}'`);
+  const mine = userComps(G);
+  const nations = [...new Set(Object.values(G.leagues).map(L => L.nation))];
+  const cups = CUPS.map(d => G.comps[d.id]).filter(Boolean);
+  const cont = CONTINENTAL.filter(d => !d.youth).map(d => G.comps[d.id]).filter(Boolean);
+  const youth = CONTINENTAL.filter(d => d.youth).map(d => G.comps[d.id]).filter(Boolean);
+  const nl = G.nl ? crow(G, compBadge({ color: "#0e1e5b" }, 32), "UEFA Nations League", `Liga A & B · ${esc(G.nl.season)}`, G.nl.winner ? `Juara: ${esc(NATIONS[G.nl.winner].name)}` : G.nl.ko.length ? `Fase gugur` : "Fase grup", `data-go="kompetisi/ringkasan" data-p='${JSON.stringify({ comp: "NL" })}'`) : "";
+  root.innerHTML = `
+    ${L0 ? `<div class="card flush" style="border-top:3px solid ${L0.color}"><div class="row click" data-league="${L0.id}" style="padding:12px;background:linear-gradient(90deg,${L0.color}66,transparent)">${compBadge(L0, 38)}<div><b style="font-size:19px">${esc(L0.name)}</b><div class="muted" style="font-size:13px">${flagEmoji(L0.nation)} ${esc(NATIONS[L0.nation].name)} · ${esc(leagueSeasonLabel(L0))}</div></div></div><div style="padding:0 12px 12px">${miniTable(G, L0.id, { top: 20 })}</div></div>` : ""}
+    ${mine.length ? `<div class="grp-h">Kompetisi klubmu</div><div class="card flush clist">${mine.map(cRow).join("")}</div>` : ""}
+    <div class="grp-h">Antarklub</div><div class="card flush clist">${cont.map(cRow).join("")}</div>
+    <div class="grp-h">Tim nasional</div><div class="card flush clist">${nl}</div>
+    <div class="grp-h">Kelompok umur</div><div class="card flush clist">${youth.map(cRow).join("") || '<div class="empty">-</div>'}</div>
+    <div class="grp-h">Liga</div>${nations.map(n => `<div class="card flush clist">${Object.values(G.leagues).filter(L => L.nation === n).sort((a, b) => a.tier - b.tier).map(lgRow).join("")}${cups.filter(c => c.nation === n).map(cRow).join("")}</div>`).join("")}`;
 });

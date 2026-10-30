@@ -1,21 +1,31 @@
 // World creation, squads, fixtures, selection, and the day-by-day simulation loop.
 import { RNG, clamp } from "./rng.js";
-import { NATIONS, LEAGUES, CLUBS, SECOND_TIER } from "./data.js";
+import { NATIONS, LEAGUES, CLUBS, EXTERNAL, POOLS } from "./data.js";
 import { A, ATTRS, PHYSICAL_DECLINE, WEIGHTS, N_ATTR, abilityFor } from "./attributes.js";
 import { genPlayer, refreshCA, slotRating, newStats, marketValue, fairWage, fullName } from "./player.js";
 import { FORMATIONS, simulateMatch } from "./match.js";
 import { day, ymd, ageOn, seasonOf, nextWeekday, fmt } from "./calendar.js";
 
-export const VERSION = 1;
+export const VERSION = 2;
 
-const DOMESTIC = { ENG1: 0.38, ESP1: 0.6, ITA1: 0.42, GER1: 0.5, FRA1: 0.55, IDN1: 0.8 };
-const FOREIGN_W = { BRA: 3, ARG: 2.5, FRA: 3, ESP: 2, POR: 2, NED: 2, BEL: 1.5, GER: 1.5, ITA: 1, ENG: 1, CRO: 1, DEN: 1.2, URU: 1, COL: 1, MAR: 1.5, SEN: 1.5, CIV: 1.2, NGA: 1.2, JPN: 1, KOR: 0.8, USA: 0.8, IDN: 0.05 };
-const FOREIGN_W_IDN = { BRA: 4, ARG: 2, JPN: 1.5, KOR: 1.5, NED: 1.5, ESP: 1, POR: 1, CRO: 0.6, NGA: 0.6, URU: 0.5, COL: 0.5 };
+// share of home-grown players per league (seniors)
+const DOMESTIC = { ENG1: 0.38, ENG2: 0.6, ESP1: 0.6, ESP2: 0.75, ITA1: 0.42, ITA2: 0.65, GER1: 0.5, GER2: 0.65, FRA1: 0.55, FRA2: 0.7, IDN1: 0.8, IDN2: 0.92, POR1: 0.45, NED1: 0.6, BEL1: 0.45, KSA1: 0.55, MAS1: 0.72, THA1: 0.78, JPN1: 0.88, BRA1: 0.85, USA1: 0.55, ARG1: 0.88, RSA1: 0.85, EGY1: 0.9, MAR1: 0.85, EXT: 0.72 };
+const FOREIGN_W = { BRA: 3, ARG: 2.5, FRA: 3, ESP: 2, POR: 2, NED: 2, BEL: 1.5, GER: 1.5, ITA: 1, ENG: 1, CRO: 1, DEN: 1.2, URU: 1, COL: 1, MAR: 1.5, SEN: 1.5, CIV: 1.2, NGA: 1.2, JPN: 1, KOR: 0.8, USA: 0.8, SRB: 0.8, GHA: 0.8, CMR: 0.7, IDN: 0.05 };
+const FOREIGN_W_ASIA = { BRA: 4, ARG: 2, JPN: 1.5, KOR: 1.5, NED: 1.5, ESP: 1, POR: 1, AUS: 1, CRO: 0.6, NGA: 0.6, URU: 0.5, COL: 0.5 };
+const FOREIGN_W_ARAB = { BRA: 4, POR: 2, FRA: 2, ESP: 1.5, MAR: 2, ALG: 1.2, SEN: 1.5, CIV: 1, COL: 1, ARG: 1.5, CRO: 0.8, SRB: 0.8, EGY: 0.6, TUN: 0.8 };
+const FOREIGN_W_AMER = { ARG: 3, COL: 3, URU: 2, VEN: 1.5, PAR: 1.5, BRA: 1.5, ECU: 1.5, CHI: 1, MEX: 1, CAN: 1, ENG: 1, GER: 0.8, ESP: 0.8, JAM: 0.6, PER: 0.6 };
+const FOREIGN_W_AFR = { NGA: 2, GHA: 2, ZWE: 2, ZMB: 2, COD: 2, MWI: 1, MOZ: 1, CMR: 1, CIV: 1, MLI: 1, SEN: 1, BRA: 0.5, TUN: 0.8, ALG: 0.8 };
+const FOREIGN_BY = { IDN: FOREIGN_W_ASIA, MAS: FOREIGN_W_ASIA, THA: FOREIGN_W_ASIA, JPN: FOREIGN_W_ASIA, BRN: FOREIGN_W_ASIA, KSA: FOREIGN_W_ARAB, EGY: FOREIGN_W_ARAB, MAR: FOREIGN_W_ARAB, USA: FOREIGN_W_AMER, BRA: FOREIGN_W_AMER, ARG: FOREIGN_W_AMER, ZAF: FOREIGN_W_AFR };
+// clubs based in another country than their league
+const NATION_OVERRIDE = { dpm: "BRN", tfct: "CAN", mtl: "CAN", van: "CAN" };
+// academy size: big leagues keep full U-19 squads, smaller leagues a core group (keeps saves small)
+const BIG = new Set(["ENG1", "ESP1", "ITA1", "GER1", "FRA1", "IDN1"]);
 const SQUAD_SHAPE = ["GK","GK","GK","DC","DC","DC","DC","DR","DR","DL","DL","DM","DM","MC","MC","MC","MC","AMR","MR","AML","ML","AMC","ST","ST","ST"];
 const YOUTH_SHAPE = ["GK","GK","DC","DC","DC","DR","DL","DM","MC","MC","MC","AMR","AML","AMC","ST","ST"];
 
-export const leagueNation = id => (LEAGUES.find(l => l.id === id) || {}).nation;
-export const clubNation = (G, cid) => leagueNation(G.clubs[cid].league) || (G.clubs[cid].nation);
+export const leagueNation = id => (LEAGUES.find(l => l.id === id) || {}).nation || (POOLS[id] ? leagueNation(POOLS[id]) : undefined);
+export const clubNation = (G, cid) => G.clubs[cid].nation || leagueNation(G.clubs[cid].league);
+export const activeLeague = (G, c) => !!(c && G.leagues[c.league]);
 
 export function birthForAge(rng, age, onDay) {
   const { y } = ymd(onDay);
@@ -24,12 +34,12 @@ export function birthForAge(rng, age, onDay) {
   return rng.int(start, end);
 }
 
-function pickNation(rng, leagueId, youth) {
-  const dom = leagueNation(leagueId);
-  const share = youth ? (leagueId === "IDN1" ? 1 : 0.9) : DOMESTIC[leagueId] ?? 0.6;
+function pickNation(rng, club, youth) {
+  const dom = club.nation || leagueNation(club.league);
+  const share = youth ? (["IDN", "JPN", "BRA", "ARG", "EGY"].includes(dom) ? 1 : 0.9) : DOMESTIC[club.league] ?? 0.65;
   if (rng.chance(share)) return dom;
-  const W = leagueId === "IDN1" ? FOREIGN_W_IDN : FOREIGN_W;
-  const keys = Object.keys(W).filter(k => k !== dom);
+  const W = FOREIGN_BY[dom] || FOREIGN_W;
+  const keys = Object.keys(W).filter(k => k !== dom && NATIONS[k]);
   return rng.weighted(keys, k => W[k]);
 }
 
@@ -39,7 +49,7 @@ export function genSenior(G, rng, club, pos, ca, nat) {
   const age = clamp(Math.round(rng.normal(26, 4)), 18, 35);
   const birth = birthForAge(rng, age, G.date);
   let gap = age < 21 ? rng.normal(28, 15) : age < 24 ? rng.normal(12, 8) : age < 27 ? rng.normal(4, 4) : 0;
-  const p = genPlayer(rng, { id: newPlayerId(G), nat: nat || pickNation(rng, club.league), pos, ca: clamp(Math.round(ca), 20, 195), pa: clamp(Math.round(ca + Math.max(0, gap)), 20, 200), birth, club: club.id, squad: "A", today: G.date });
+  const p = genPlayer(rng, { id: newPlayerId(G), nat: nat || pickNation(rng, club), pos, ca: clamp(Math.round(ca), 20, 195), pa: clamp(Math.round(ca + Math.max(0, gap)), 20, 200), birth, club: club.id, squad: "A", today: G.date });
   p.contract = { end: seasonOf(G.date) + rng.int(1, 4), wage: fairWage(p, club.league) };
   G.players[p.id] = p;
   return p;
@@ -52,17 +62,26 @@ export function genYouth(G, rng, club, pos, age, nat) {
   const ca = clamp(Math.round(youthLevel(club, age) + rng.normal(0, 9)), 25, 150);
   let gap = rng.normal(40 + yq, 22);
   if (rng.chance(0.012 * yq / 10)) gap += rng.float(30, 60); // wonderkid
-  const p = genPlayer(rng, { id: newPlayerId(G), nat: nat || pickNation(rng, club.league, true), pos, ca, pa: clamp(Math.round(ca + Math.max(8, gap)), 30, 200), birth, club: club.id, squad: "Y", today: G.date });
+  const p = genPlayer(rng, { id: newPlayerId(G), nat: nat || pickNation(rng, club, true), pos, ca, pa: clamp(Math.round(ca + Math.max(8, gap)), 30, 200), birth, club: club.id, squad: "Y", today: G.date });
   p.contract = { end: seasonOf(G.date) + 2, wage: 0, youth: true };
   G.players[p.id] = p;
   return p;
 }
 
 export const clubNatOK = (club, nat) => club.policy !== "basque" || nat === "ESP";
-function buildClub(G, rng, c) {
-  const club = { ...c, colors: [...c.colors], squad: [], youthSquad: [], formation: rng.pick(["4-3-3", "4-2-3-1", "4-2-3-1", "4-4-2", "4-3-3"]), nation: leagueNation(c.league) || c.nation };
+export function youthSize(club) { return club.ext ? 0 : BIG.has(club.league) ? 16 : 10; }
+export function buildClub(G, rng, c, squadOnly = false) {
+  const club = { ...c, colors: [...c.colors], squad: [], youthSquad: [], formation: rng.pick(["4-3-3", "4-2-3-1", "4-2-3-1", "4-4-2", "4-3-3"]), nation: NATION_OVERRIDE[c.id] || c.nation || leagueNation(c.league) };
   if (club.id === "ath") club.policy = "basque";
   G.clubs[club.id] = club;
+  if (squadOnly) return club;
+  fillSquad(G, rng, club);
+  return club;
+}
+// (re)generate a full squad; used at creation and when a pool club is promoted
+export function fillSquad(G, rng, club) {
+  for (const id of [...club.squad, ...club.youthSquad]) if (!G.players[id]?.isUser) delete G.players[id];
+  club.squad = club.squad.filter(id => G.players[id]?.isUser); club.youthSquad = club.youthSquad.filter(id => G.players[id]?.isUser);
   const nat = () => (club.policy === "basque" ? "ESP" : undefined);
   // first XI from the formation, then depth for every position
   const starters = FORMATIONS[club.formation].map(f => f[0]);
@@ -73,54 +92,88 @@ function buildClub(G, rng, c) {
     const ca = pos === "GK" && depth.indexOf("GK") !== i ? club.level - 26 + rng.normal(0, 6) : club.level - 7 + rng.normal(0, 5);
     club.squad.push(genSenior(G, rng, club, pos, ca, nat()).id);
   });
-  YOUTH_SHAPE.forEach(pos => club.youthSquad.push(genYouth(G, rng, club, pos, rng.int(15, 18), nat()).id));
+  YOUTH_SHAPE.slice(0, youthSize(club)).forEach(pos => club.youthSquad.push(genYouth(G, rng, club, pos, rng.int(15, 18), nat()).id));
   return club;
+}
+// external clubs get an U-19 side only when they enter a youth competition
+export function ensureYouth(G, rng, club) {
+  if (club.youthSquad.length >= 14) return;
+  YOUTH_SHAPE.forEach(pos => club.youthSquad.push(genYouth(G, rng, club, pos, rng.int(16, 18)).id));
 }
 
 // ---------- fixtures ----------
-function roundRobin(teams, rng) {
+// round robin: `legs` meetings between every pair (home/away alternating)
+export function roundRobin(teams, rng, legs = 2) {
   const t = rng.shuffle([...teams]);
   if (t.length % 2) t.push(null);
-  const n = t.length, rounds = [];
+  const n = t.length, base = [];
   for (let r = 0; r < n - 1; r++) {
     const pairs = [];
     for (let i = 0; i < n / 2; i++) {
       const a = t[i], b = t[n - 1 - i];
       if (a && b) pairs.push(r % 2 === 0 ? [a, b] : [b, a]);
     }
-    rounds.push(pairs);
+    base.push(pairs);
     t.splice(1, 0, t.pop());
   }
-  const second = rounds.map(rd => rd.map(([a, b]) => [b, a]));
-  return [...rounds, ...second];
+  const out = [];
+  for (let k = 0; k < legs; k++) out.push(...base.map(rd => rd.map(([a, b]) => (k % 2 ? [b, a] : [a, b]))));
+  return out;
 }
-export const INTL_WINDOWS = [[9, 4], [10, 9], [11, 13], [3, 23], [6, 5]]; // [month, start day]
-function isBreakWeek(n) {
-  const { m, d } = ymd(n);
-  return INTL_WINDOWS.some(([wm, wd]) => m === wm && d >= wd && d <= wd + 6);
+// International windows (FIFA calendar from 2026): [month, first day, length in days, matches]
+export const INTL_WINDOWS = [[9, 21, 16, 4], [11, 9, 9, 2], [3, 22, 9, 2], [6, 1, 9, 2]];
+export function intlWindowAt(n) {
+  const { y } = ymd(n);
+  for (const [m, d, len, k] of INTL_WINDOWS) { const s0 = day(y, m, d); if (n >= s0 && n < s0 + len) return { start: s0, len, n: k }; }
+  return null;
 }
-export function makeFixtures(G, rng, league, season) {
-  const rounds = roundRobin(league.teams, rng);
-  let d = nextWeekday(day(season, 8, 15), 6);
-  const end = day(season + 1, 5, 24);
+export const inIntlWindow = n => !!intlWindowAt(n);
+const isBreakWeek = n => inIntlWindow(n) || inIntlWindow(n + 1);
+
+// first/last matchday of a league season
+export function seasonSpan(L, season, phase) {
+  if (L.cal === "aug") return [day(season, ...L.start), day(season + 1, ...L.end)];
+  if (L.cal === "year") return [day(season, ...L.start), day(season, ...L.end)];
+  return phase === "Apertura" ? [day(season, 1, 23), day(season, 5, 17)] : [day(season, ...L.start), day(season, ...L.end)];
+}
+export function leagueRounds(G, rng, L) {
+  if (!L.zones) return roundRobin(L.teams, rng, L.rounds || 2);
+  const Z = L.zones.map((_, z) => L.teams.filter(id => G.clubs[id].zone === z));
+  const rr = Z.map(t => roundRobin(t, rng, L.rounds || 2));
+  const rounds = rr[0].map((r, i) => [...r, ...(rr[1][i] || [])]);
+  const a = rng.shuffle([...Z[0]]), b = rng.shuffle([...Z[1]]);
+  for (let k = 0; k < (L.cross || 0); k++) rounds.push(a.map((x, i) => (k % 2 ? [b[(i + k) % b.length], x] : [x, b[(i + k) % b.length]])));
+  return rounds;
+}
+export function makeFixtures(G, rng, L, season, phase) {
+  const rounds = leagueRounds(G, rng, L);
+  const [first, last] = seasonSpan(L, season, phase);
+  const blocked = new Set(G.blocked?.[L.nation] || []);
+  const paused = n => (L.pause ? (() => { const { y } = ymd(n); return n >= day(y, ...L.pause[0]) && n <= day(y, ...L.pause[1]); })() : false);
+  const ok = x => !isBreakWeek(x) && !paused(x) && !blocked.has(x) && !blocked.has(x + 1);
   const sats = [];
-  for (let x = d; x <= end; x += 7) if (!isBreakWeek(x)) sats.push(x);
+  for (let x = nextWeekday(first, 6); x <= last; x += 7) if (ok(x)) sats.push(x);
   const dates = [];
   if (sats.length >= rounds.length) {
-    for (let i = 0; i < rounds.length; i++) dates.push(sats[Math.round(i * (sats.length - 1) / (rounds.length - 1))]);
+    for (let i = 0; i < rounds.length; i++) dates.push(sats[Math.round(i * (sats.length - 1) / Math.max(1, rounds.length - 1))]);
   } else {
     const need = rounds.length - sats.length;
     const mids = [];
-    for (let i = 0; i < need; i++) mids.push(sats[Math.round((i + 1) * sats.length / (need + 1))] - 3);
+    for (let i = 0; i < need; i++) mids.push(sats[Math.min(sats.length - 1, Math.round((i + 1) * sats.length / (need + 1)))] - 3 - 7 * Math.floor(i / Math.max(1, sats.length)));
     dates.push(...[...sats, ...mids].sort((a, b) => a - b));
   }
-  league.fixtures = [];
+  L.fixtures = [];
+  const tag = phase ? phase[0] : "";
   rounds.forEach((rd, r) => rd.forEach(([h, a]) => {
     const off = ymd(dates[r]).wd === 6 && rng.chance(0.3) ? 1 : 0; // some Sunday games
-    league.fixtures.push({ r: r + 1, d: dates[r] + off, h, a, res: null, id: `${league.id}-${season}-${r + 1}-${h}` });
+    L.fixtures.push({ r: r + 1, d: dates[r] + off, h, a, res: null, id: `${L.id}-${season}${tag}-${r + 1}-${h}` });
   }));
-  league.season = season;
+  L.season = season; L.phase = phase || null; L.state = "run"; L.po = null;
+  // league statistics start again with the new season
+  for (const id of L.teams) for (const pid of G.clubs[id].squad) { const p = G.players[pid]; if (p) { p.st = newStats(); p.ycCount = 0; } }
 }
+export const leagueSeasonLabel = L => (L.cal === "aug" ? seasonLabelOf(L.season) : L.cal === "half" ? `${L.phase || "Clausura"} ${L.season}` : String(L.season));
+const seasonLabelOf = s => `${s}/${String((s + 1) % 100).padStart(2, "0")}`;
 
 // ---------- selection ----------
 export function available(G, pid, date) {
@@ -207,13 +260,36 @@ export function quickSim(rng, H, Aw) {
 }
 
 // ---------- world creation ----------
+// home clubs for the "random" academy: Indonesian provinces → nearby clubs (top two tiers)
+const PROV_CLUBS = {
+  "Aceh": ["prsr"], "Sumatera Utara": ["psms"], "Sumatera Barat": ["smp"], "Riau": ["psps"], "Jambi": ["psps"], "Sumatera Selatan": ["ssu"], "Bengkulu": ["ssu"],
+  "Lampung": ["bhy"], "Kepulauan Bangka Belitung": ["ssu"], "Kepulauan Riau": ["psps"], "Daerah Khusus Ibukota Jakarta": ["prj"], "Jawa Barat": ["prb", "bks", "pkd", "psgc"],
+  "Jawa Tengah": ["jvu", "psis", "prjp", "prsl", "pku", "ktf"], "Daerah Istimewa Yogyakarta": ["psim", "pss"], "Jawa Timur": ["prs", "are", "prk", "mad", "prsla", "dlt", "dej"],
+  "Banten": ["dew", "prt", "rns"], "Bali": ["bal"], "Nusa Tenggara Barat": ["bal"], "Nusa Tenggara Timur": ["bal"], "Kalimantan Barat": ["bfc"], "Kalimantan Tengah": ["isk"],
+  "Kalimantan Selatan": ["bar2"], "Kalimantan Timur": ["bfc", "pba"], "Kalimantan Utara": ["bfc"], "Sulawesi Utara": ["psm"], "Sulawesi Tengah": ["psm"], "Sulawesi Selatan": ["psm"],
+  "Sulawesi Tenggara": ["psm"], "Gorontalo": ["psm"], "Sulawesi Barat": ["psm"], "Maluku": ["psm"], "Maluku Utara": ["psm"], "Papua": ["ppr"], "Papua Barat": ["psb"],
+  "Papua Selatan": ["ppr"], "Papua Tengah": ["psb"], "Papua Pegunungan": ["ppr"], "Papua Barat Daya": ["psb"],
+};
 export const CITY = {
-  IDN: { makassar: "psm", bandung: "prb", jakarta: "prj", surabaya: "prs", denpasar: "bal", gianyar: "bal", singaraja: "bal", bali: "bal", malang: "are", samarinda: "bfc", solo: "prsl", surakarta: "prsl", kediri: "prk", tangerang: "prt", padang: "smp", yogyakarta: "psim", jogja: "psim", jepara: "prjp", biak: "psb", jayapura: "psb", pamekasan: "mad", madura: "mad", ternate: "mal", bekasi: "bhy", tangsel: "dew" },
-  ESP: { madrid: "rma", barcelona: "bar", bilbao: "ath", sevilla: "sev", valencia: "val", "san sebastián": "rso", "san sebastian": "rso", vigo: "cel", girona: "gir", pamplona: "osa", villarreal: "vil", getafe: "get", oviedo: "ovi", elche: "elc", palma: "mll", vitoria: "ala" },
-  ENG: { london: "ars", manchester: "mci", liverpool: "liv", birmingham: "avl", newcastle: "new", leeds: "lee", brighton: "bha", nottingham: "nfo", sunderland: "sun", wolverhampton: "wol", bournemouth: "bou", burnley: "bur" },
-  ITA: { milano: "mil", milan: "int", torino: "juv", turin: "juv", roma: "rom", rome: "rom", napoli: "nap", naples: "nap", bergamo: "ata", bologna: "bol", firenze: "fio", genova: "gen", como: "com", parma: "par", udine: "udi" },
-  GER: { münchen: "fcb", munich: "fcb", dortmund: "bvb", leipzig: "rbl", leverkusen: "b04", frankfurt: "sge", stuttgart: "vfb", freiburg: "scf", berlin: "fcu", hamburg: "hsv", köln: "koe", bremen: "svw", mainz: "m05", wolfsburg: "wob", augsburg: "fca" },
-  FRA: { paris: "psg", marseille: "om", lyon: "oly", lille: "los", monaco: "asm", nice: "ogc", lens: "rcl", rennes: "srf", strasbourg: "rcs", nantes: "fcn", toulouse: "tfc", brest: "sb2", metz: "fcm", lorient: "fcl", auxerre: "aja", angers: "sco", "le havre": "hac" },
+  IDN: { "kota makassar": "psm", "kota bandung": "prb", bandung: "prb", "kota adm. jakarta pusat": "prj", "kota surabaya": "prs", "kota denpasar": "bal", gianyar: "bal", "kota malang": "are", malang: "are", "kota samarinda": "bfc", "kota surakarta": "prsl", "kota kediri": "prk", kediri: "prk", "kota tangerang": "prt", tangerang: "prt", "kota padang": "smp", "kota yogyakarta": "psim", sleman: "pss", jepara: "prjp", "biak numfor": "psb", "kota jayapura": "ppr", pamekasan: "mad", bangkalan: "mad", sampang: "mad", sumenep: "mad", "kota bekasi": "bks", "kota depok": "pkd", ciamis: "psgc", "kota medan": "psms", "kota pekanbaru": "psps", kudus: "pku", "kota banda aceh": "prsr", "kota semarang": "jvu", "kota banjarmasin": "bar2", lamongan: "prsla", "kota balikpapan": "pba", sidoarjo: "dlt", kendal: "ktf", "kota palembang": "ssu", "kota bandar lampung": "bhy", "kota palangka raya": "isk", "kota tangerang selatan": "dew", serang: "dew" },
+  ESP: { madrid: "rma", barcelona: "bar", bilbao: "ath", sevilla: "sev", valencia: "val", "san sebastián": "rso", "san sebastian": "rso", vigo: "cel", pamplona: "osa", villarreal: "vil", getafe: "get", elche: "elc", vitoria: "ala", "a coruña": "dep", malaga: "mlg", "málaga": "mlg", santander: "rac" },
+  ENG: { london: "ars", manchester: "mci", liverpool: "liv", birmingham: "avl", newcastle: "new", leeds: "lee", brighton: "bha", nottingham: "nfo", sunderland: "sun", bournemouth: "bou", coventry: "cov", hull: "hul", ipswich: "ips" },
+  ITA: { milano: "mil", milan: "int", torino: "juv", turin: "juv", roma: "rom", rome: "rom", napoli: "nap", naples: "nap", bergamo: "ata", bologna: "bol", firenze: "fio", genova: "gen", como: "com", parma: "par", udine: "udi", frosinone: "fro", monza: "mon", venezia: "ven", lecce: "lec", cagliari: "cag" },
+  GER: { "münchen": "fcb", munich: "fcb", dortmund: "bvb", leipzig: "rbl", leverkusen: "b04", frankfurt: "sge", stuttgart: "vfb", freiburg: "scf", berlin: "fcu", hamburg: "hsv", "köln": "koe", bremen: "svw", mainz: "m05", augsburg: "fca", gelsenkirchen: "s04", paderborn: "scp" },
+  FRA: { paris: "psg", marseille: "om", lyon: "oly", lille: "los", monaco: "asm", nice: "ogc", lens: "rcl", rennes: "srf", strasbourg: "rcs", toulouse: "tfc", brest: "sb2", lorient: "fcl", auxerre: "aja", angers: "sco", "le havre": "hac", "le mans": "lms", troyes: "est" },
+  POR: { lisboa: "slb", lisbon: "slb", porto: "fcp", braga: "brg", guimarães: "vsc" },
+  NED: { amsterdam: "ajx", rotterdam: "fey", eindhoven: "psv", alkmaar: "az", enschede: "twe", utrecht: "utr" },
+  BEL: { brussel: "rsca", bruxelles: "rsca", brugge: "cbr", genk: "krc", gent: "kaa", antwerpen: "ant", "liège": "sta" },
+  KSA: { riyadh: "hil", jeddah: "itt", dammam: "ett" },
+  JPN: { tokyo: "fct", osaka: "gam", kobe: "vis", yokohama: "yfm", kashima: "ksm", hiroshima: "san", kawasaki: "kaw", urawa: "ura", kyoto: "kyo", nagoya: "nag" },
+  BRA: { "rio de janeiro": "fla", "são paulo": "pmr", "sao paulo": "pmr", "belo horizonte": "cru", "porto alegre": "gre", salvador: "bah", curitiba: "cap", santos: "sfc" },
+  ARG: { "buenos aires": "carp", rosario: "rc", "la plata": "edlp", "córdoba": "tal", cordoba: "tal", avellaneda: "racc", mendoza: "irm" },
+  USA: { "new york": "nyc", "los angeles": "lafc", miami: "mia", atlanta: "atl", seattle: "sea", columbus: "clb", philadelphia: "phi", dallas: "dal", houston: "hou" },
+  MAS: { "johor bahru": "jdt", "kuala lumpur": "klc", "shah alam": "sel", kuching: "kch" },
+  THA: { bangkok: "bgu", buriram: "brm", chonburi: "chb", ratchaburi: "rat" },
+  ZAF: { johannesburg: "orp", soweto: "kc", pretoria: "mam", durban: "amz", "cape town": "ste" },
+  EGY: { cairo: "ahly", kairo: "ahly", giza: "zam", alexandria: "iab" },
+  MAR: { casablanca: "wac", rabat: "far", berkane: "rsb", "fès": "masf", fes: "masf" },
 };
 
 export function fifaU18Allowed(nat, age, clubNat) {
@@ -222,20 +298,21 @@ export function fifaU18Allowed(nat, age, clubNat) {
   return { ok: false, note: "Aturan FIFA melarang transfer internasional pemain di bawah 18 tahun (kecuali pengecualian sah)." };
 }
 
+export const START = day(2026, 7, 1);
 export function createWorld(f) {
   const seed = f.seed ?? (Math.random() * 2 ** 32) >>> 0;
   const rng = new RNG(seed);
-  const start = day(2026, 7, 1);
+  const start = START;
   const G = {
-    v: VERSION, seed, rs: 0, date: start, season: 2026, nextId: 1, players: {}, clubs: {}, leagues: {}, pools: {},
+    v: VERSION, seed, rs: 0, date: start, season: 2026, nextId: 1, players: {}, clubs: {}, leagues: {}, comps: {}, pools: {}, blocked: {},
     user: null, inbox: [], news: [], intl: { nt: {} }, flags: [], lastMatch: null,
   };
-  for (const L of LEAGUES) {
-    G.leagues[L.id] = { ...L, teams: [], fixtures: [], history: [] };
+  for (const L of LEAGUES) G.leagues[L.id] = { ...L, teams: [], fixtures: [], history: [] };
+  for (const c of CLUBS) {
+    if (G.leagues[c.league]) { buildClub(G, rng, c); G.leagues[c.league].teams.push(c.id); }
+    else { buildClub(G, rng, c, true); (G.pools[c.league] = G.pools[c.league] || []).push(c.id); }
   }
-  for (const c of CLUBS) { buildClub(G, rng, c); G.leagues[c.league].teams.push(c.id); }
-  for (const [lid, arr] of Object.entries(SECOND_TIER)) G.pools[lid] = arr.map(c => ({ ...c, nation: leagueNation(lid) }));
-  for (const L of Object.values(G.leagues)) makeFixtures(G, rng, L, 2026);
+  for (const c of EXTERNAL) buildClub(G, rng, c);
 
   // ---- the user ----
   const nat = f.nat;
@@ -245,27 +322,31 @@ export function createWorld(f) {
   let clubId = f.club && f.club !== "acak" ? f.club : null;
   let note = null;
   const natsOf = cn => (f.nat2 === cn ? f.nat2 : nat);
-  const domesticLeague = LEAGUES.find(l => l.nation === nat) || (f.nat2 && LEAGUES.find(l => l.nation === f.nat2));
+  const bc = f.bcountry || nat;
+  const homeNation = [bc, nat, f.nat2].find(n => n && LEAGUES.some(l => l.nation === n && l.tier === 1));
   if (clubId) {
     const cn = G.clubs[clubId].nation;
     const chk = fifaU18Allowed(natsOf(cn), age, cn);
     if (!chk.ok) { note = chk.note + " Kariermu dimulai di usia 18."; birth = birthForAge(rng, 18, start); age = 18; }
     else if (chk.note) note = chk.note;
-  } else {
+  } else if (homeNation) {
     const city = (f.birthplace || "").trim().toLowerCase();
-    if (domesticLeague) {
-      clubId = CITY[domesticLeague.nation]?.[city];
-      if (!clubId) {
-        const teams = G.leagues[domesticLeague.id].teams;
-        clubId = rng.weighted(teams, id => G.clubs[id].youth ** 2 / (hard ? G.clubs[id].level / 60 : 1));
-      }
-    } else {
-      const euOK = NATIONS[nat]?.eu && age >= 16;
-      if (!euOK && age < 18) { note = "Aturan FIFA melarang transfer internasional di bawah 18 tahun, jadi kariermu dimulai di usia 18."; birth = birthForAge(rng, 18, start); age = 18; }
-      const leagues = euOK && age < 18 ? ["ESP1", "ITA1", "GER1", "FRA1"] : ["ESP1", "ITA1", "GER1", "FRA1", "ENG1"];
-      const teams = leagues.flatMap(l => G.leagues[l].teams).filter(id => clubNatOK(G.clubs[id], nat));
-      clubId = rng.weighted(teams, id => (hard ? 1 / G.clubs[id].level : 1) * G.clubs[id].youth);
+    const inLg = id => G.clubs[id] && G.leagues[G.clubs[id].league];
+    clubId = CITY[homeNation]?.[city] || CITY[homeNation]?.[city.replace(/^kota /, "")];
+    if (!clubId && homeNation === "IDN" && f.bprov) {
+      const near = (PROV_CLUBS[f.bprov] || []).filter(inLg);
+      if (near.length) clubId = rng.weighted(near, id => G.clubs[id].level);
     }
+    if (!clubId || !inLg(clubId)) {
+      const teams = LEAGUES.filter(l => l.nation === homeNation && l.tier === 1).flatMap(l => G.leagues[l.id].teams);
+      clubId = rng.weighted(teams, id => G.clubs[id].youth ** 2 / (hard ? G.clubs[id].level / 60 : 1));
+    }
+  } else {
+    const euOK = NATIONS[nat]?.eu && age >= 16;
+    if (!euOK && age < 18) { note = "Aturan FIFA melarang transfer internasional di bawah 18 tahun, jadi kariermu dimulai di usia 18."; birth = birthForAge(rng, 18, start); age = 18; }
+    const leagues = euOK && age < 18 ? ["ESP1", "ITA1", "GER1", "FRA1", "POR1", "NED1", "BEL1"] : ["ESP1", "ITA1", "GER1", "FRA1", "ENG1", "POR1", "NED1", "BEL1"];
+    const teams = leagues.flatMap(l => G.leagues[l].teams).filter(id => clubNatOK(G.clubs[id], nat));
+    clubId = rng.weighted(teams, id => (hard ? 1 / G.clubs[id].level : 1) * G.clubs[id].youth);
   }
   const club = G.clubs[clubId];
   const u = buildUser(rng, { ...f, birth }, club, start, newPlayerId(G));
@@ -277,7 +358,8 @@ export function createWorld(f) {
     fed: nat, styles: f.styles || [], traits: f.traits || [], trainRatings: [], injuries: [],
   };
   G.user.adapt = needsLanguage(u, club) ? { lang: needsLanguage(u, club), since: start } : null;
-  addMail(G, "Selamat datang di akademi", `${club.name} resmi menerimamu${u.squad === "Y" ? " di tim U-19" : " di skuad senior"}. Staf pelatih akan memantau perkembanganmu setiap pekan. Musim 2026/27 dimulai pertengahan Agustus.${note ? "\n\n" + note : ""}${G.user.adapt ? `\n\nKamu belum bisa berbahasa ${G.user.adapt.lang}; beberapa bulan pertama mungkin terasa berat.` : ""}`, "info", { from: "Kepala Akademi", cat: "Klub" });
+  const Lu = G.leagues[club.league];
+  addMail(G, "Selamat datang di akademi", `${club.name} resmi menerimamu${u.squad === "Y" ? " di tim U-19" : " di skuad senior"}. Staf pelatih akan memantau perkembanganmu setiap pekan. ${Lu.name} ${Lu.cal === "aug" ? "musim 2026/27" : Lu.cal === "half" ? "Torneo Clausura 2026" : "2026"} ${Lu.cal === "aug" ? `dimulai ${fmt(day(2026, ...Lu.start))}` : "sedang berjalan"}.${note ? "\n\n" + note : ""}${G.user.adapt ? `\n\nKamu belum bisa berbahasa ${G.user.adapt.lang}; beberapa bulan pertama mungkin terasa berat.` : ""}`, "info", { from: "Kepala Akademi", cat: "Klub" });
   if (note && /FIFA/.test(note)) G.flags.push("FIFA-18");
   G.rs = rng.s;
   return G;
@@ -306,7 +388,7 @@ export const TRAITS = {
   setia: { label: "Setia", desc: "Terikat kuat pada klub dan suporter yang membesarkannya.", hid: { loy: [17, 20] }, attrs: {} },
 };
 const WF = { Lemah: [4, 7], Sedang: [9, 12], Kuat: [14, 17] };
-export const LANGS = { IDN: "Indonesia", ESP: "Spanyol", ENG: "Inggris", FRA: "Prancis", GER: "Jerman", ITA: "Italia", POR: "Portugis", NED: "Belanda", BEL: "Prancis", CRO: "Kroasia", DEN: "Denmark", BRA: "Portugis", ARG: "Spanyol", URU: "Spanyol", COL: "Spanyol", MAR: "Arab", SEN: "Prancis", CIV: "Prancis", NGA: "Inggris", JPN: "Jepang", KOR: "Korea", USA: "Inggris" };
+export const LANGS = Object.fromEntries(Object.entries(NATIONS).map(([k, v]) => [k, v.language]));
 export function needsLanguage(p, club) {
   const l = LANGS[club.nation];
   return l && !(p.langs || []).includes(l) ? l : null;
@@ -360,6 +442,7 @@ export function buildUser(rng, f, club, today, id) {
   return u;
 }
 export const newCompStats = () => ({ liga: newStats(), u19: newStats(), timnas: newStats() });
+export const compStats = (G, key) => G.user.cs[key] || (G.user.cs[key] = newStats());
 
 export function addMail(G, title, body, kind = "info", extra = {}) {
   G.inbox.unshift({ id: (G.mailId = (G.mailId || 0) + 1), date: G.date, title, body, kind, read: false, ...extra });
@@ -378,11 +461,16 @@ export const userClub = G => G.clubs[userP(G).club];
 export function leagueOfClub(G, cid) { return G.leagues[G.clubs[cid].league]; }
 
 // ---------- standings ----------
-export function table(G, leagueId) {
+// standings; `zone` filters a conference/zone, fixtures can be any list (league or group stage)
+export function table(G, leagueId, zone = null) {
   const L = G.leagues[leagueId];
-  const rows = Object.fromEntries(L.teams.map(id => [id, { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] }]));
-  for (const f of L.fixtures) {
-    if (!f.res) continue;
+  const teams = zone == null ? L.teams : L.teams.filter(id => G.clubs[id].zone === zone);
+  return standings(G, teams, L.fixtures);
+}
+export function standings(G, teams, fixtures) {
+  const rows = Object.fromEntries(teams.map(id => [id, { id, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0, form: [] }]));
+  for (const f of fixtures) {
+    if (!f.res || f.po || f.tie != null) continue;
     const [a, b] = f.res, h = rows[f.h], w = rows[f.a];
     if (!h || !w) continue;
     h.p++; w.p++; h.gf += a; h.ga += b; w.gf += b; w.ga += a;
@@ -390,7 +478,7 @@ export function table(G, leagueId) {
     else if (a < b) { w.w++; h.l++; w.pts += 3; h.form.push("K"); w.form.push("M"); }
     else { h.d++; w.d++; h.pts++; w.pts++; h.form.push("S"); w.form.push("S"); }
   }
-  return Object.values(rows).sort((x, y) => y.pts - x.pts || (y.gf - y.ga) - (x.gf - x.ga) || y.gf - x.gf || G.clubs[x.id].name.localeCompare(G.clubs[y.id].name));
+  return Object.values(rows).sort((x, y) => y.pts - x.pts || (y.gf - y.ga) - (x.gf - x.ga) || y.gf - x.gf || (G.clubs[x.id]?.name || x.id).localeCompare(G.clubs[y.id]?.name || y.id));
 }
 
 // ---------- applying match results to players ----------
@@ -413,7 +501,7 @@ export function applyLine(G, rng, p, L, comp, isUser) {
     if (L.pos === "GK" && L.conc === 0 && L.min >= 60) s.cs++;
   };
   add(st);
-  if (isUser) add(G.user.cs[comp]);
+  if (isUser) add(compStats(G, comp));
   p.form.push(L.rating); if (p.form.length > 10) p.form.shift();
   p.cond = L.cond ?? clamp(p.cond - L.min * 0.12, 20, 100);
   p.sharp = clamp((p.sharp ?? 60) + L.min / 9, 0, 100);
@@ -470,11 +558,21 @@ export function developPlayer(G, rng, p, weeks = 1, playedShare = 0.5) {
   const target = Math.min(g, Math.max(0, gap));
   const before = p.a.slice();
   if (target > 0) {
-    let acc = 0, guard = 0;
-    while (acc < target && guard++ < 400) {
-      const i = rng.weighted(idxs, i => w[i] * (focus[KEYS[i]] || 1) * (20.4 - p.a[i]) * (age < 21 && PHYS.has(i) ? 1.6 : 1));
+    // cumulative weights, refreshed every 25 picks (cheap enough for 20k players a month)
+    let acc = 0, guard = 0, cdf = null, tot = 0;
+    const step = 0.05;
+    const build = () => {
+      cdf = new Float64Array(N_ATTR); tot = 0;
+      for (let i = 0; i < N_ATTR; i++) { tot += p.a[i] >= 20 ? 0 : w[i] * (focus[KEYS[i]] || 1) * (20.4 - p.a[i]) * (age < 21 && PHYS.has(i) ? 1.6 : 1); cdf[i] = tot; }
+    };
+    while (acc < target && guard < 400) {
+      if (guard++ % 25 === 0) build();
+      if (tot <= 0) break;
+      const r = rng.next() * tot;
+      let lo = 0, hi = N_ATTR - 1;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (cdf[mid] < r) lo = mid + 1; else hi = mid; }
+      const i = lo;
       if (p.a[i] >= 20) continue;
-      const step = 0.05;
       p.a[i] = Math.min(20, p.a[i] + step);
       acc += 10.6 * w[i] * step / w.sum;
     }

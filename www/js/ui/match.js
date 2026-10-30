@@ -25,7 +25,7 @@ register("laga", "pra", (G, root, p) => {
   root.innerHTML = `
   <div class="mhead"><div class="cmp">${esc(pd.comp)}${pd.round ? ` · Pekan ${pd.round}` : ""}</div>
     <div class="score"><div class="tn" style="text-align:right">${esc(H.name)}</div>${badge(G, H, 40)}<div class="sc" style="font-size:24px">VS</div>${badge(G, A, 40)}<div class="tn" style="text-align:left">${esc(A.name)}</div></div>
-    <div class="mmeta"><span>${fmtDay(G.date)}</span>${pd.kind !== "timnas" ? `<span>Kandang ${esc(H.name)}</span>` : ""}</div></div>
+    <div class="mmeta"><span>${fmtDay(G.date)}</span>${pd.kind !== "timnas" ? `<span>${pd.neutral ? "Stadion netral" : pd.youth ? "Lapangan akademi" : `Kandang ${esc(H.name)}`}</span>` : ""}</div></div>
   <div class="card" style="border-left:3px solid var(--go-a)">${role}${u.cond < 85 ? ` Kondisimu ${Math.round(u.cond)}%.` : ""}</div>
   <div class="seg" style="margin-bottom:10px"><button data-side="0" aria-pressed="${side === 0}">${esc(H.name)}</button><button data-side="1" aria-pressed="${side === 1}">${esc(A.name)}</button></div>
   <div class="lineup"><div class="lh" style="background:${col[0]};color:${lum(col[0]) > 62 ? "#111" : "#fff"}">${esc(T.name)}</div>
@@ -188,7 +188,7 @@ register("laga", "hasil", (G, root) => {
   root.innerHTML = `
   <div class="mhead"><div class="cmp">${esc(Sm.comp)}</div>
     <div class="score"><div class="tn" style="text-align:right">${esc(Sm.home.name)}<small>${esc(Sm.managers?.[0] || "")}</small></div>${badge(G, H, 42)}<div class="sc">${Sm.score[0]} - ${Sm.score[1]}</div>${badge(G, A, 42)}<div class="tn" style="text-align:left">${esc(Sm.away.name)}<small>${esc(Sm.managers?.[1] || "")}</small></div></div>
-    ${Sm.pens ? `<div class="muted" style="margin-top:4px">${esc(Sm.pens)}</div>` : ""}
+    ${Sm.aet || Sm.pens || Sm.agg ? `<div class="muted" style="margin-top:4px">${[Sm.aet ? "setelah perpanjangan waktu" : "", Sm.pensScore ? `adu penalti ${Sm.pensScore[0]}-${Sm.pensScore[1]}` : Sm.pens ? esc(Sm.pens) : "", Sm.agg ? `agregat ${Sm.agg[0]}-${Sm.agg[1]}` : ""].filter(Boolean).join(" · ")}</div>` : ""}
     <div class="mmeta"><span>${fmtDay(Sm.date)}</span>${Sm.venue ? `<span>◈ ${esc(Sm.venue)}</span>` : ""}<span>★ ${esc(Sm.pomName)} ${pomLine ? pill(pomLine.rating) : ""}</span></div></div>
   ${me ? `<div class="card" style="border-left:3px solid #ffd54a"><b>Kamu</b>: ${me.min} menit · rating ${pill1(me.rating)}${me.gls ? ` · ${me.gls} gol` : ""}${me.ast ? ` · ${me.ast} assist` : ""}${me.sh ? ` · ${me.sh} tembakan` : ""}${me.pas ? ` · umpan ${me.pasc}/${me.pas}` : ""}${me.drb ? ` · ${me.drb} dribel` : ""}${me.tck ? ` · ${me.tck} tekel` : ""}${me.injured ? ' · <b style="color:var(--bad)">cedera</b>' : ""}</div>` : '<div class="card">Kamu tidak dimainkan di laga ini.</div>'}
   <button class="btn pri" id="cont" style="width:100%;min-height:48px;margin-bottom:10px;font-family:var(--display);font-size:20px">Lanjutkan</button>

@@ -1,7 +1,7 @@
 // The user's career: squad status, staff reports, contracts, transfers, loans, manager talks,
 // national teams, season awards and history.
 import { RNG, clamp } from "./rng.js";
-import { NATIONS, LEAGUES } from "./data.js";
+import { NATIONS } from "./data.js";
 import { A, ATTRS } from "./attributes.js";
 import { genPlayer, slotRating, marketValue, fairWage, fullName, newStats } from "./player.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day } from "./calendar.js";
@@ -141,7 +141,7 @@ export function weeklyCareer(G, rng) {
   // loans
   if (!G.user.loan && age <= 21 && (p.squad === "A" ? share < 0.25 : p.ca > firstTeamThreshold(G, club) - (age >= 18 ? 38 : 26) && age >= 17) && rng.chance(G.user.wantLoan ? 0.45 : 0.2)) {
     const nat = G.clubs[p.club].nation;
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 8 && c.level >= p.ca - 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level <= p.ca + 8 && c.level >= p.ca - 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
     if (cands.length) {
       const c = rng.pick(cands);
       decision(G, "Tawaran peminjaman", `${c.name} (${G.leagues[c.league].name}) ingin meminjammu sampai akhir musim. ${club.name} setuju karena ingin kamu mendapat menit bermain.`, [
@@ -155,7 +155,7 @@ export function weeklyCareer(G, rng) {
   const value = marketValue(p, G.date, club.league);
   const appeal = ((p.form.length ? avg(p.form.slice(-8)) : 6.6) - 6.6) * 0.15 + (p.ca - club.level) / 60 + (G.user.listed ? 0.25 : 0) + (age <= 23 ? 0.05 : 0);
   if (p.squad === "A" && !G.user.loan && rng.chance(clamp(0.05 + appeal, 0.02, 0.35))) {
-    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
+    const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level >= p.ca - 6 && c.level <= p.ca + 16 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
     if (!cands.length) return;
     const c = rng.weighted(cands, c => c.level);
     const fee = Math.round(value * rng.float(0.85, 1.4) * 10) / 10;
@@ -395,44 +395,36 @@ export function nationalLineup(squad, formation = "4-3-3") {
 }
 
 // ---------- season end: awards & history ----------
+// global awards on 1 June (league honours are handed out when each league finishes)
+const COEF = { ENG1: 1, ESP1: 1, ITA1: 0.95, GER1: 0.95, FRA1: 0.9, POR1: 0.75, NED1: 0.72, BEL1: 0.66, BRA1: 0.7, ARG1: 0.66, KSA1: 0.56, USA1: 0.55, JPN1: 0.52, ENG2: 0.5, ESP2: 0.42, ITA2: 0.42, GER2: 0.44, FRA2: 0.4, EGY1: 0.45, MAR1: 0.45, RSA1: 0.42, IDN1: 0.35, MAS1: 0.3, THA1: 0.32, IDN2: 0.2 };
 export function seasonAwards(G) {
   const season = G.season;
   const res = { leagues: {}, global: {} };
   const ageAt = p => ageOn(p.birth, day(season + 1, 6, 1));
-  const champions = {};
-  for (const L of Object.values(G.leagues)) {
-    const tb = table(G, L.id);
-    champions[L.id] = tb[0].id;
-    const players = L.teams.flatMap(id => G.clubs[id].squad.map(pid => G.players[pid])).filter(Boolean);
-    const nMatches = (L.teams.length - 1) * 2;
-    const elig = players.filter(p => p.st.apps >= nMatches * 0.5);
-    const ar = p => p.st.rsum / Math.max(1, p.st.rn);
-    const topScorer = players.slice().sort((a, b) => b.st.gls - a.st.gls || b.st.ast - a.st.ast)[0];
-    const potm = elig.slice().sort((a, b) => ar(b) - ar(a))[0];
-    const young = elig.filter(p => ageAt(p) <= 21).sort((a, b) => ar(b) - ar(a))[0];
-    const tots = [];
-    for (const [g, n] of [["GK", 1], ["DEF", 4], ["MID", 3], ["ATT", 3]]) tots.push(...elig.filter(p => posGroup(p.main) === g).sort((a, b) => ar(b) - ar(a)).slice(0, n).map(p => p.id));
-    res.leagues[L.id] = { champion: tb[0].id, runnerUp: tb[1].id, topScorer: topScorer?.id, topGoals: topScorer?.st.gls, potm: potm?.id, young: young?.id, tots };
-    L.history.push({ season, champion: tb[0].id, runnerUp: tb[1].id, topScorer: topScorer?.id, topGoals: topScorer?.st.gls, potm: potm?.id, table: tb.map(r => [r.id, r.pts]) });
-    addNews(G, { title: `${G.clubs[tb[0].id].name} juara ${L.name}`, body: `${G.clubs[tb[0].id].name} menutup musim ${seasonLabel(season)} sebagai juara ${L.name} dengan ${tb[0].pts} poin, unggul ${tb[0].pts - tb[1].pts} poin atas ${G.clubs[tb[1].id].name}.`, tag: "Kompetisi", club: tb[0].id, league: L.id });
+  const champions = new Set(Object.values(G.leagues).map(L => L.history[L.history.length - 1]?.champion).filter(Boolean));
+  for (const L of Object.values(G.leagues)) if (L.cal === "aug" && L.history.length) res.leagues[L.id] = L.history[L.history.length - 1];
+  // continental runs: winners and finalists of the big club competitions get a boost
+  const cont = {};
+  for (const [id, w] of [["UCL", 9], ["UEL", 4], ["ACLE", 3], ["LIB", 4], ["CAFCL", 2], ["UECL", 2]]) {
+    const c = G.comps[id]; if (!c || !c.stages.length) continue;
+    const S = c.stages[c.stages.length - 1];
+    if (S.type === "ko" && S.ties.length === 1) { const t = S.ties[0]; for (const x of [t.a, t.b]) cont[x] = (cont[x] || 0) + (t.w ? (t.w === x ? w : w * 0.4) : w * 0.6); }
   }
-  // global awards
-  const coef = { ENG1: 1, ESP1: 1, ITA1: 0.95, GER1: 0.95, FRA1: 0.9, IDN1: 0.35 };
-  const all = Object.values(G.players).filter(p => !p.retired && p.club && G.clubs[p.club] && coef[G.clubs[p.club].league] && (p.st.apps + p.st.sub) >= 15);
+  const all = Object.values(G.players).filter(p => !p.retired && p.club && G.clubs[p.club] && COEF[G.clubs[p.club].league] && (p.st.apps + p.st.sub) >= 15);
   const sc = p => {
     const lg = G.clubs[p.club].league;
     const ar = p.st.rsum / Math.max(1, p.st.rn);
-    const champ = champions[lg] === p.club ? 6 : 0;
+    const champ = champions.has(p.club) ? 6 : 0;
     const intl = p.isUser && G.user.tourWin === season ? 10 : 0;
-    return ((ar - 6.5) * 22 + p.st.gls * 0.55 + p.st.ast * 0.35 + champ + p.ca / 8 + intl) * coef[lg];
+    return ((ar - 6.5) * 22 + p.st.gls * 0.55 + p.st.ast * 0.35 + champ + (cont[p.club] || 0) + p.ca / 8 + intl) * COEF[lg];
   };
   const ranked = all.map(p => ({ p, s: sc(p) })).sort((a, b) => b.s - a.s);
   res.global.ballon = ranked.slice(0, 30).map(x => x.p.id);
-  res.global.young = ranked.filter(x => ageAt(x.p) <= 21 && G.clubs[x.p.club].league !== "IDN1").slice(0, 10).map(x => x.p.id);
-  const shoe = all.map(p => ({ p, s: p.st.gls * (G.clubs[p.club].league === "IDN1" ? 1 : 2) })).sort((a, b) => b.s - a.s);
+  res.global.young = ranked.filter(x => ageAt(x.p) <= 21 && COEF[G.clubs[x.p.club].league] >= 0.6).slice(0, 10).map(x => x.p.id);
+  const shoe = all.map(p => ({ p, s: p.st.gls * (COEF[G.clubs[p.club].league] >= 0.9 ? 2 : COEF[G.clubs[p.club].league] >= 0.6 ? 1.5 : 1) })).sort((a, b) => b.s - a.s);
   res.global.shoe = shoe[0]?.p.id;
   G.lastAwards = res;
-  addNews(G, { title: `Bola Emas ${season + 1}: ${fullName(G.players[res.global.ballon[0]])}`, body: `${fullName(G.players[res.global.ballon[0]])} (${G.clubs[G.players[res.global.ballon[0]].club].name}) dinobatkan sebagai pemain terbaik dunia.`, tag: "Penghargaan", club: G.players[res.global.ballon[0]].club });
+  if (res.global.ballon.length) addNews(G, { title: `Bola Emas ${season + 1}: ${fullName(G.players[res.global.ballon[0]])}`, body: `${fullName(G.players[res.global.ballon[0]])} (${G.clubs[G.players[res.global.ballon[0]].club].name}) dinobatkan sebagai pemain terbaik dunia.`, tag: "Penghargaan", club: G.players[res.global.ballon[0]].club });
   return res;
 }
 
@@ -442,33 +434,28 @@ export function userSeasonEnd(G, awards) {
   const L = G.leagues[club.league];
   const cs = u.cs;
   const ar = s => s.rn ? +(s.rsum / s.rn).toFixed(2) : null;
+  const sum = s => (s ? { apps: s.apps + s.sub, gls: s.gls, ast: s.ast, rating: ar(s) } : null);
+  const cups = Object.entries(cs).filter(([k, s]) => !["liga", "u19", "timnas"].includes(k) && s.apps + s.sub > 0).map(([k, s]) => ({ comp: k, ...sum(s) }));
   const row = {
     season: seasonLabel(season), club: club.id, clubName: club.name, league: L?.name || "", loan: !!u.loan,
     apps: cs.liga.apps, sub: cs.liga.sub, gls: cs.liga.gls, ast: cs.liga.ast, rating: ar(cs.liga), min: cs.liga.min, pom: cs.liga.pom,
-    u19: cs.u19.apps + cs.u19.sub ? { apps: cs.u19.apps + cs.u19.sub, gls: cs.u19.gls, ast: cs.u19.ast, rating: ar(cs.u19) } : null,
-    intl: cs.timnas.apps + cs.timnas.sub ? { apps: cs.timnas.apps + cs.timnas.sub, gls: cs.timnas.gls, ast: cs.timnas.ast, rating: ar(cs.timnas) } : null,
-    ca: p.ca, notes: [],
+    u19: cs.u19.apps + cs.u19.sub ? sum(cs.u19) : null,
+    intl: cs.timnas.apps + cs.timnas.sub ? sum(cs.timnas) : null,
+    cups, ca: p.ca, notes: [...(u.seasonNotes || [])],
   };
-  const la = awards.leagues[club.league];
-  if (la) {
-    const pos = table(G, club.league).findIndex(r => r.id === club.id) + 1;
-    row.pos = pos;
-    if (la.champion === club.id && cs.liga.apps + cs.liga.sub > 0) { u.trophies.push({ name: L.name, year: seasonLabel(season), club: club.name }); row.notes.push("Juara liga"); }
-    if (la.topScorer === p.id) { u.awards.push({ name: `Top Skor ${L.name}`, year: seasonLabel(season), detail: `${la.topGoals} gol` }); row.notes.push("Top skor"); }
-    if (la.potm === p.id) { u.awards.push({ name: `Pemain Terbaik ${L.name}`, year: seasonLabel(season) }); row.notes.push("Pemain terbaik liga"); }
-    if (la.young === p.id) { u.awards.push({ name: `Pemain Muda Terbaik ${L.name}`, year: seasonLabel(season) }); row.notes.push("Pemain muda terbaik"); }
-    if (la.tots.includes(p.id)) { u.awards.push({ name: `Tim Terbaik Musim ${L.name}`, year: seasonLabel(season) }); }
-  }
+  if (u.leaguePos && u.leaguePos.league === club.league) row.pos = u.leaguePos.pos;
   const br = awards.global.ballon.indexOf(p.id);
   if (br === 0) { u.awards.push({ name: "Bola Emas", year: String(season + 1) }); row.notes.push("Bola Emas"); }
   else if (br > 0) { row.ballon = br + 1; addMail(G, "Bola Emas", `Kamu masuk nominasi Bola Emas dan finis di peringkat ${br + 1}.`, "good"); }
   const yr = awards.global.young.indexOf(p.id);
-  if (yr === 0) u.awards.push({ name: "Trofi Pemain Muda Eropa", year: String(season + 1) });
-  if (awards.global.shoe === p.id) u.awards.push({ name: "Sepatu Emas", year: seasonLabel(season), detail: `${cs.liga.gls} gol` });
+  if (yr === 0) u.awards.push({ name: "Trofi Pemain Muda Terbaik Dunia", year: String(season + 1) });
+  if (awards.global.shoe === p.id) u.awards.push({ name: "Sepatu Emas", year: seasonLabel(season), detail: `${p.st.gls} gol` });
   u.history.push(row);
-  const msg = `Musim ${row.season} selesai. ${row.apps + row.sub} penampilan liga, ${row.gls} gol, ${row.ast} assist${row.rating ? `, rating rata-rata ${row.rating.toFixed(2)}` : ""}.${row.notes.length ? " " + row.notes.join(", ") + "!" : ""}`;
+  const cupLine = cups.length ? ` Di kompetisi lain: ${cups.reduce((s, c) => s + c.apps, 0)} laga, ${cups.reduce((s, c) => s + c.gls, 0)} gol.` : "";
+  const msg = `Musim ${row.season} selesai. ${row.apps + row.sub} penampilan liga, ${row.gls} gol, ${row.ast} assist${row.rating ? `, rating rata-rata ${row.rating.toFixed(2)}` : ""}.${cupLine}${row.notes.length ? " " + row.notes.join(", ") + "!" : ""}`;
   addMail(G, "Ringkasan musim", msg, row.notes.length ? "good" : "info");
   u.cs = newCompStats();
+  u.seasonNotes = [];
 }
 
 // End-of-contract handling for the user (June)
@@ -477,7 +464,7 @@ export function userContractExpiry(G, rng) {
   if (G.user.loan) return;
   if (p.contract.end > season) return;
   const age = ageOn(p.birth, G.date);
-  const cands = Object.values(G.clubs).filter(c => c.id !== p.club && LEAGUES.some(l => l.id === c.league) && c.level <= p.ca + 12 && c.level >= p.ca - 25 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
+  const cands = Object.values(G.clubs).filter(c => c.id !== p.club && !!G.leagues[c.league] && c.level <= p.ca + 12 && c.level >= p.ca - 25 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)));
   const picks = rng.shuffle(cands).slice(0, 6).sort((a, b) => b.level - a.level).slice(0, 3);
   if (!picks.length) { p.contract = { end: season + 1, wage: fairWage(p, userClub(G).league) }; addMail(G, "Kontrak diperpanjang", "Tidak ada klub lain yang serius, jadi kamu menandatangani kontrak baru 1 musim dengan klubmu.", "info"); return; }
   decision(G, "Kamu pemain bebas", `Kontrakmu dengan ${userClub(G).name} habis. Beberapa klub menawarimu kontrak:`, picks.map(c => {

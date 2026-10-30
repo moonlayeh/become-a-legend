@@ -2,7 +2,8 @@
 
 Game karier pemain sepak bola offline untuk Android. Semuanya dijalankan mesin aturan di dalam HP, tanpa internet dan tanpa AI:
 
-- **Dunia**: 6 liga dengan klub asli (Premier League, LaLiga, Serie A, Bundesliga, Ligue 1, Super League Indonesia). Semua pemain, staf, dan nama dibuat acak (fiktif).
+- **Dunia**: 25 liga di 19 negara dengan komposisi klub 2026/27 (liga kalender: 2026), termasuk divisi 2 Inggris, Spanyol, Italia, Jerman, Prancis, dan Indonesia dengan promosi/degradasi. Semua pemain, staf, dan nama dibuat acak (fiktif).
+- **Kompetisi**: 19 piala domestik; Liga Champions, Liga Europa, Liga Konferensi (fase liga 36 tim, peserta resmi 2026/27); AFC Champions League Elite/Two; Libertadores; CAF Champions League; UEFA Youth League dan Libertadores Sub-20 untuk pemain akademi; UEFA Nations League A/B; Piala AFF 2026 dengan grup resmi.
 - **Pemain**: atribut 1–20 (Teknik, Mental, Fisik, Kiper), kemampuan dan potensi tersembunyi (CA/PA 1–200), kepribadian, posisi, kondisi, moral, dan cedera.
 - **Perkembangan**: dipengaruhi usia, potensi, profesionalisme, menit bermain, kualitas akademi, fokus dan intensitas latihan. Atribut fisik menurun setelah sekitar usia 29.
 - **Laga 2D**: setiap aksi (umpan, dribel, tekel, umpan silang, tembakan) dihitung dari atribut, lalu diputar di papan 2D. Ada mode sorotan dan kecepatan ×10, ×25, dan ×60.
@@ -10,7 +11,7 @@ Game karier pemain sepak bola offline untuk Android. Semuanya dijalankan mesin a
 - **Aturan nyata**: larangan FIFA untuk transfer internasional di bawah 18 tahun (dengan pengecualian UE/EEE usia 16–17), jendela transfer, akumulasi kartu dan skorsing, serta kebijakan pemain Basque di Athletic Club.
 - **Mode Normal dan Keras**.
 
-Belum ada: degradasi/promosi, piala domestik, kompetisi antarklub Eropa/Asia, dan pindah federasi timnas.
+Penyederhanaan: beberapa tanggal kompetisi bersifat perkiraan; liga tanpa divisi bawah yang disimulasikan tidak punya degradasi.
 
 ## Membuat APK
 
@@ -31,11 +32,19 @@ Lalu buka http://localhost:8000.
 
 ## Struktur
 
-- `www/js/data.js`: negara, liga, klub, kumpulan nama
+- `www/js/data.js`: kumpulan nama; `nations.js`: semua negara dan bahasa; `regions.js`: provinsi dan kabupaten/kota Indonesia
+- `www/js/clubs.js`: liga, klub 2026/27, klub luar untuk kompetisi antarklub; `compdata.js`: definisi piala dan kompetisi antarklub
+- `www/js/comps.js`: mesin kompetisi (fase liga, grup, gugur, play-off liga, promosi/degradasi)
 - `www/js/attributes.js`, `player.js`: atribut, CA, pembuatan pemain
 - `www/js/match.js`: mesin laga; `viewer.js`: papan 2D
 - `www/js/world.js`, `sim.js`: dunia, jadwal, kalender, perkembangan
 - `www/js/career.js`, `intl.js`: karier, kontrak, transfer, timnas, penghargaan
 - `www/js/meta.js`: data turunan untuk tampilan (peran, reputasi, jadwal latihan, staf, kategori pesan)
-- `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, kompetisi), `match.js` (persiapan, laga 2D, hasil), `create.js` (menu utama, pembuatan pemain)
+- `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, liga), `comps.js` (piala, antarklub, Nations League, bagan), `match.js` (persiapan, laga 2D, hasil), `create.js` (menu utama, pembuatan pemain)
 - `test/`: uji kalibrasi laga dan simulasi beberapa musim
+
+## Sumber data
+
+- Wilayah Indonesia: [idn-area-data](https://www.npmjs.com/package/idn-area-data) v4.0.1 (berbasis Kepmendagri), lisensi [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/1-0/).
+- Nama negara: [i18n-iso-countries](https://www.npmjs.com/package/i18n-iso-countries) (lokal Indonesia).
+- Komposisi liga dan peserta kompetisi: artikel musim 2026–27/2026 di Wikipedia, situs resmi UEFA, CAF, liga, dan media olahraga (lihat riwayat commit).
