@@ -421,7 +421,7 @@ register("pers", "konferensi", (G, root) => {
   $("#pstart", root)?.addEventListener("click", () => { P.started = true; save(); render(); });
   $$("[data-ans]", root).forEach(b => (b.onclick = () => { const k = b.dataset.ans, t = q[k][+b.dataset.i]; answerPress(G, k, t); save(); toast(k === "pos" ? "Wartawan menyukai jawabanmu." : k === "neg" ? "Jawabanmu memancing reaksi." : "Jawaban dicatat."); render(); }));
   $("#pleave", root)?.addEventListener("click", () => { if (!confirm("Tinggalkan konferensi pers sekarang? Media akan kecewa.")) return; finishPress(G, true); save(); render(); });
-  $("#pdone", root)?.addEventListener("click", () => go("portal", "ringkasan", {}, true));
+  $("#pdone", root)?.addEventListener("click", () => go(G.settings?.mode === "kartu" ? "main" : "portal", G.settings?.mode === "kartu" ? "kartu" : "ringkasan", {}, true));
 });
 
 // ============ KARIER: statistik keseluruhan ============

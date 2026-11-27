@@ -4,6 +4,7 @@ import "./ui/portal.js";
 import "./ui/player.js";
 import { openCoachTalk, openAgentTalk, openMateTalk } from "./ui/people.js";
 import "./ui/extra.js";
+import "./ui/kartu.js";
 import "./ui/club.js";
 import "./ui/match.js";
 import { mainMenu } from "./ui/create.js";
@@ -21,7 +22,7 @@ S.onAct = (act, el) => {
 function enter(G) {
   S.G = G;
   S.drawer = false;
-  go("portal", "ringkasan", {}, true);
+  if (!G.settings || G.settings.mode !== "lengkap") go("main", "beranda", {}, true); else go("portal", "ringkasan", {}, true);
 }
 window.addEventListener("DOMContentLoaded", () => mainMenu(enter));
 window.addEventListener("error", e => { try { toast("Terjadi kesalahan: " + (e.message || "").slice(0, 80)); } catch {} });

@@ -391,7 +391,7 @@ const QUOTA = { GK: 3, DEF: 8, MID: 8, ATT: 6 };
 export function selectNational(G, nat, team, forceUser = false) {
   const all = nationalSquad(G, nat, team, forceUser);
   const by = { GK: [], DEF: [], MID: [], ATT: [] };
-  const score = p => p.ca * (1 + ((p.form.length ? avg(p.form.slice(-6)) : 6.8) - 6.8) * 0.03);
+  const score = p => p.ca * (1 + ((p.form.length ? avg(p.form.slice(-6)) : 6.8) - 6.8) * 0.03) * (p.isUser ? 1 + ((G.user.life?.fame ?? 30) - 30) / 900 + (G.user.ntBuzz || 0) * 0.01 : 1);
   for (const p of all) by[posGroup(p.main)].push(p);
   const squad = [];
   for (const g of Object.keys(by)) squad.push(...by[g].sort((a, b) => score(b) - score(a)).slice(0, QUOTA[g]));

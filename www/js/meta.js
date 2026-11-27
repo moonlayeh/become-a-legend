@@ -63,7 +63,7 @@ export const PITCH_XY = { GK: [50, 93], DR: [86, 77], DC: [50, 79], DL: [14, 77]
 // ---------- words ----------
 export const reputation = (G, p) => {
   const lg = G.clubs[p.club]?.league;
-  const s = p.ca + (["IDN1", "IDN2", "MAS1", "THA1"].includes(lg) ? -15 : lg ? 6 : 0) + Math.min(20, (p.caps || 0) * 0.4) + ((p.isUser ? G.user.awards.length : 0) * 4);
+  const s = p.ca + (["IDN1", "IDN2", "MAS1", "THA1"].includes(lg) ? -15 : lg ? 6 : 0) + Math.min(20, (p.caps || 0) * 0.4) + ((p.isUser ? G.user.awards.length : 0) * 4) + (p.isUser && G.user.life ? (G.user.life.fame - 30) / 4 : 0);
   return s >= 165 ? "Seluruh Dunia" : s >= 148 ? "Kontinental" : s >= 128 ? "Nasional" : s >= 100 ? "Regional" : "Lokal";
 };
 export const clubReputation = c => { const v = c.level + (["IDN", "MAS", "THA", "BRN"].includes(c.nation) ? 38 : ["ZAF", "EGY", "MAR", "KSA"].includes(c.nation) ? 18 : 0); return v >= 158 ? "Seluruh Dunia" : v >= 142 ? "Kontinental" : v >= 118 ? "Nasional" : v >= 100 ? "Regional" : "Lokal"; };

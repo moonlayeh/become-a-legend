@@ -26,7 +26,7 @@ export class PitchPlayer {
     // a live match keeps growing while the user answers key moments; a replay is complete from the start
     this.live = !!R.live; this.complete = !this.live; this.waiting = false;
     this.kits = kitPair(R.colors);
-    this.keyT = []; this.near = t => this.keyT.some(k => t >= k - 20 && t <= k + 5);
+    this.keyT = []; this.nearWin = [20, 5]; this.near = t => this.keyT.some(k => t >= k - this.nearWin[0] && t <= k + this.nearWin[1]);
     this.slots = R.lineups.map(l => l.start.map(s => ({ ...s, x: 52.5, y: 34, vx: 0, vy: 0, fx: 0, fy: -1, ph: Math.random() * 6 })));
     this.spNow = 25; this.trail = [];
     this.evs = []; this.evSeen = 0; this.keySeen = 0;
@@ -42,7 +42,7 @@ export class PitchPlayer {
     const F = this.frames;
     this.endT = F.length ? F[F.length - 1].t : 0;
     const h2 = F.find(f => f.k === "half" && f.h === 2); this.h2 = h2 ? h2.t : Infinity;
-    for (; this.keySeen < F.length; this.keySeen++) { const f = F[this.keySeen]; if (f.k === "shot" || f.k === "goal" || f.k === "pen" || f.k === "corner") this.keyT.push(f.t); }
+    for (; this.keySeen < F.length; this.keySeen++) { const f = F[this.keySeen]; if ((this.keyKinds || ["shot", "goal", "pen", "corner"]).includes(f.k)) this.keyT.push(f.t); }
     const src = this.R.events;
     if (src.length > this.evSeen) {
       const add = src.slice(this.evSeen).map(e => this.hooks.mapEvent ? this.hooks.mapEvent(e) : e);
@@ -220,7 +220,7 @@ export class PitchPlayer {
     if (this.dead) return;
     const realDt = Math.min(0.1, (now - this.last) / 1000); this.last = now;
     const approaching = !this.complete && this.endT - this.t < 14; // slow down into the user's key moment
-    const target = this.hl ? (this.near(this.t) || approaching ? 2.5 : 45) : approaching ? Math.min(this.speed, 4) : this.speed;
+    const target = this.hl ? (this.near(this.t) || approaching ? this.nearSlow || 2.5 : this.hlFast || 45) : approaching ? Math.min(this.speed, 4) : this.speed;
     // ease between playback speeds so highlights don't jerk
     this.spNow += (target - this.spNow) * Math.min(1, realDt * (target < this.spNow ? 6 : 2));
     const sp = this.spNow;

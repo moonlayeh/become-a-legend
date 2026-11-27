@@ -41,9 +41,10 @@ export const SECTIONS = {
   cari: { label: "Rekrutmen", tabs: [["pemain", "Database Pemain"]] },
   staf: { label: "Staf", tabs: [["profil", "Profil"]] },
   pers: { label: "Konferensi Pers", tabs: [["konferensi", "Konferensi Pers"]] },
+  main: { label: "Karier", tabs: [] },
 };
 const DRAWER = [["portal", "Portal"], ["pemain", "Profil Saya"], ["skuad", "Skuad"], ["latihan", "Latihan"], ["klub", "Klub"], ["kompetisi", "Kompetisi"], ["timnas", "Tim Nasional"], ["cari", "Database Pemain"], ["pengaturan", "Pengaturan"]];
-export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal", moments: "normal", momentTimer: 8 };
+export const DEFAULT_SETTINGS = { trainStop: true, currency: "IDR", textScale: 1, speed: 25, autoEffort: "Normal", moments: "normal", momentTimer: 8, mode: "kartu" };
 export function applySettings(G) {
   G.settings = { ...DEFAULT_SETTINGS, ...(G.settings || {}) };
   setCurrency(G.settings.currency);
@@ -100,6 +101,7 @@ function nextMatchText(G) {
 }
 export function goLabel(G) {
   if (G.user.retired) return "Pensiun";
+  if (G.settings?.mode === "kartu") return "Main";
   if (G.pending) return "Ke Laga";
   const dec = G.inbox.filter(m => m.kind === "decision" && !m.done).length;
   if (dec) return `Pesan <span class="badge" style="background:#fff;color:#7b2fd6">${dec}</span>`;
@@ -138,7 +140,8 @@ export function render(opt = {}) {
     </div>
     ${tabs.length ? `<div class="tb2"><div class="sec">${esc(secLabel)}</div><div class="subtabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${l}${tabBadge(k)}</button>`).join("")}</div></div>` : ""}
   </header>
-  <main class="page" id="page"></main>
+  <main class="page ${G.settings?.mode === "kartu" ? "withnav" : ""}" id="page"></main>
+  ${G.settings?.mode === "kartu" ? `<nav class="bnav" aria-label="Navigasi bawah">${[["main", "beranda", "🏠", "Beranda"], ["kompetisi", "ringkasan", "📊", "Klasemen"], ["main", "kartu", "▶", "Main"], ["main", "koleksi", "🃏", "Koleksi"], ["pemain", "ringkasan", "👤", "Profil"]].map(([sx, tb, ic, l]) => `<button class="${tb === "kartu" ? "bmain" : ""}" data-bnav="${sx}/${tb}" ${S.sec === sx && S.tab === tb ? 'aria-current="page"' : ""}><span>${ic}</span>${l}</button>`).join("")}</nav>` : ""}
   <div class="scrim" id="scrim" ${S.drawer ? "" : "hidden"}></div>
   <aside class="drawer ${S.drawer ? "open" : ""}" id="drawer" aria-label="Menu utama">
     <div class="dh">${avatar(lookFor(u), club.colors, 48, 18)}<div><b>${esc(fullName(u))}</b><span>${esc(club.name)}</span></div></div>
@@ -151,6 +154,7 @@ export function render(opt = {}) {
   $("#menu").onclick = () => { S.drawer = true; $("#drawer").classList.add("open"); $("#scrim").hidden = false; };
   $("#scrim").onclick = closeDrawer;
   $("#go").onclick = onGo;
+  $$("[data-bnav]").forEach(b => (b.onclick = () => { const [sx, tb] = b.dataset.bnav.split("/"); go(sx, tb, {}); }));
   $$(".subtabs [data-tab]").forEach(b => (b.onclick = () => go(S.sec, b.dataset.tab, S.p)));
   $$("#drawer [data-nav]").forEach(b => (b.onclick = () => { S.drawer = false; go(b.dataset.nav, null, {}); }));
   restore();
@@ -176,6 +180,7 @@ document.addEventListener("click", e => {
 // ---------- continue / processing ----------
 export function onGo() {
   const G = S.G;
+  if (G.settings?.mode === "kartu") { go("main", "kartu"); return; }
   if (G.pending) { go("laga", "pra"); return; }
   if (G.trainingDue) { go("latihan", "sesi"); return; }
   const dec = G.inbox.find(m => m.kind === "decision" && !m.done);

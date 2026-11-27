@@ -43,10 +43,20 @@ Lalu buka http://localhost:8000.
 - `www/js/career.js`, `intl.js`: karier, kontrak, transfer, timnas, penghargaan
 - `www/js/meta.js`: data turunan untuk tampilan (peran, reputasi, jadwal latihan, staf, kategori pesan)
 - `www/js/ui/`: tampilan bergaya FM untuk HP tegak: `shell.js` (bilah atas, menu, Memproses), `portal.js`, `player.js` (profil, latihan, medis), `club.js` (skuad, klub, liga), `comps.js` (piala, antarklub, Nations League, bagan), `match.js` (persiapan, laga 2D dengan momen kunci, hasil), `create.js` (menu utama, pembuatan pemain), `people.js` (Pribadi, Kontrak, negosiasi, obrolan), `extra.js` (Kontak, staf, Database Pemain, timnas, Transfer, Pengembangan, Performa, Perbandingan)
-- `test/`: uji kalibrasi laga, momen kunci (`moment-test.mjs`), dan simulasi beberapa musim
+- `test/`: uji kalibrasi laga, momen kunci (`moment-test.mjs`), mode kartu (`card-test.mjs`), dan simulasi beberapa musim
 
 ## Sumber data
 
 - Wilayah Indonesia: [idn-area-data](https://www.npmjs.com/package/idn-area-data) v4.0.1 (berbasis Kepmendagri), lisensi [Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/1-0/).
 - Nama negara: [i18n-iso-countries](https://www.npmjs.com/package/i18n-iso-countries) (lokal Indonesia).
 - Komposisi liga dan peserta kompetisi: artikel musim 2026–27/2026 di Wikipedia, situs resmi UEFA, CAF, liga, dan media olahraga (lihat riwayat commit).
+
+## Mode Kartu Cepat (bawaan)
+
+Karier berjalan seperti gim kartu: tiap ketukan **Main** memajukan dunia (latihan otomatis) sampai kartu berikutnya.
+
+- **Kartu kehidupan** (Latihan, Pertandingan, Karier, Kehidupan Pribadi) dengan dua pilihan: geser ke kiri/kanan atau ketuk tombolnya. Pilihan menggerakkan lima statistik: Bakat (dari atribut asli), Kesehatan (memengaruhi risiko cedera), Mental (suasana hati), Sosial (memengaruhi pemilihan pemain oleh pelatih), dan Ketenaran (minat klub, sponsor, timnas), plus uang.
+- **Laga** dengan instruksi pelatih (main aman/serang habis-habisan, benar-benar mengubah gaya main tim) dan **3 momen kunci** berupa kartu dua pilihan; laga 2D diputar cepat (sekitar satu menit).
+- **Kartu keputusan** dari dunia nyata gim (kontrak, transfer, timnas, konferensi pers), **rekap bulanan**, **Jalan Kejayaan** (poin musim yang memberi ⭐), **pilihan super** (pakai ⭐, hasil terbaik dijamin), **Koleksi** kartu, dan **Trofi**.
+- Tanpa energi, tanpa iklan, tanpa menunggu. Mode lama bisa dipilih di Pengaturan → Mode bermain → Manajer lengkap.
+

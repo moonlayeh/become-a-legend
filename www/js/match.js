@@ -74,10 +74,16 @@ export const MOMENT_LABEL = {
 export function* matchGen(rng, home, away, opts = {}) {
   const rec = !!opts.record;
   const interactive = !!opts.interactive && opts.userId != null;
+  const MENT = opts.mentality || 0;
+  const uSide = opts.userId == null ? -1 : [home, away].findIndex(t => [...t.xi, ...(t.bench || [])].some(p => p.id === opts.userId));
   const decisions = [];
   let lastAtk = 0, lastDef = 0, nAtk = 0, nDef = 0, qBoost = 0, slideFoul = false;
   // how often moments come up: [seconds between attacking moments, max attacking, seconds between defending, max defending]
-  const [GAP_A, MAX_A, GAP_D, MAX_D] = { sering: [110, 14, 170, 7], normal: [190, 10, 260, 5], jarang: [360, 6, 480, 3] }[opts.momentRate || "normal"] || [190, 10, 260, 5];
+  const [GAP_A, MAX_A, GAP_D, MAX_D] = { sering: [110, 14, 170, 7], normal: [190, 10, 260, 5], jarang: [360, 6, 480, 3], kartu: [1150, 3, 1300, 2] }[opts.momentRate || "normal"] || [190, 10, 260, 5];
+  const MAX_T = opts.momentRate === "kartu" ? 3 : 99; // card mode: three key moments a match, one per phase
+  const TARGETS = opts.momentRate === "kartu" && interactive ? [rng.int(6, 25), rng.int(30, 52), rng.int(56, 76)].map(x => x * 60) : null;
+  const phaseOK = () => !TARGETS || clock >= TARGETS[Math.min(2, nAtk + nDef)];
+  const late = () => TARGETS && clock >= TARGETS[Math.min(2, nAtk + nDef)] + 240;
   const S = [makeSide(home, 0, 1.035), makeSide(away, 1, 1)];
   const frames = opts.sink?.frames || [], events = opts.sink?.events || [], shots = opts.sink?.shots || []; // a live screen can watch these grow
   let half = 1, t = 0, clock = 0; // t: seconds in half, clock: absolute seconds for replay
@@ -298,7 +304,7 @@ export function* matchGen(rng, home, away, opts = {}) {
     const mine = positions(poss, true);
     const opp = positions(1 - poss, false).map(q => ({ ...q, x: L - q.x, y: W - q.y }));
     const [presser, pd0] = nearest(opp, F.x, F.y);
-    const closing = 2 + sk(presser.o, [["wor",1],["acc",1],["ant",1]]) * 4;
+    const closing = (2 + sk(presser.o, [["wor",1],["acc",1],["ant",1]]) * 4) * (MENT && poss !== uSide ? 1 - 0.12 * MENT : 1);
     const pd = Math.max(0.6, pd0 - closing);
     const c = carrier;
     const isGK = c.pos === "GK";
@@ -321,6 +327,8 @@ export function* matchGen(rng, home, away, opts = {}) {
     if (F.x < 40 && (pd < 2.5 || isGK)) opts.push(["long", isGK ? 0.5 + c.p.a[A.kic] / 60 : 0.18]);
     if (!isGK && F.x < 22 && pd < 1.5 && DEF.has(c.pos)) opts.push(["clear", 0.6]);
     opts.push(["pass", isGK ? 1.1 : 1.6]);
+    // team instruction from the card mode: attack more (and leave more space behind) or play it safe
+    if (MENT && poss === uSide) for (const o of opts) if (o[0] === "shoot" || o[0] === "cross" || o[0] === "dribble") o[1] *= 1 + 0.25 * MENT;
     return { T, O, F, mine, opp, presser, pd0, pd, c, isGK, dG, xg, opts };
   }
   function passTargets(sit, long) {
@@ -546,8 +554,8 @@ export function* matchGen(rng, home, away, opts = {}) {
     const sit = situation();
     const { F, c, pd, dG, xg, opts: ai, isGK } = sit;
     if (isGK) return null;
-    const key = F.x > 62 || (F.x > 38 && pd < 2.6) || (F.x > 50 && clock - lastAtk > GAP_A * 2.5);
-    if (!key || clock - lastAtk < GAP_A || nAtk >= MAX_A) return null;
+    const key = F.x > 62 || (F.x > 38 && pd < 2.6) || (F.x > 50 && clock - lastAtk > (TARGETS ? 420 : GAP_A * 2.5));
+    if (!(key || late()) || !phaseOK() || (!TARGETS && clock - lastAtk < GAP_A) || nAtk >= MAX_A || nAtk + nDef >= MAX_T) return null;
     const w = Object.fromEntries(ai);
     const scored = passTargets(sit, false).sort((a, b) => b.s - a.s);
     const ahead = scored.filter(z => z.prog > 5 && z.q.o.pos !== "GK").sort((a, b) => (ATT.has(b.q.o.pos) ? 1.5 : 1) * b.s - (ATT.has(a.q.o.pos) ? 1.5 : 1) * a.s);
@@ -567,9 +575,9 @@ export function* matchGen(rng, home, away, opts = {}) {
     return { sit, m: { kind: "atk", t: clock, min: minLabel(), side: poss, pid: c.p.id, x: F.x, dG: Math.round(dG), pressure: pd, zone: F.x > 88 ? "kotak penalti" : F.x > 70 ? "sepertiga akhir" : F.x > 45 ? "lini tengah" : "area sendiri", options: o.map(({ w: _w, ...r }) => r), ai: best.k, weights: Object.fromEntries(o.map(x => [x.k, x.w])) } };
   }
   function defendMoment(me) {
-    if (carrier.pos === "GK" || me.pos === "GK" || clock - lastDef < GAP_D || nDef >= MAX_D) return null;
+    if (carrier.pos === "GK" || me.pos === "GK" || !phaseOK() || (!TARGETS && clock - lastDef < GAP_D) || nDef >= MAX_D || nAtk + nDef >= MAX_T) return null;
     const sit = situation();
-    if (sit.presser.o !== me || sit.pd0 > 7 || sit.F.x < 45) return null;
+    if (sit.presser.o !== me || sit.pd0 > (late() ? 10 : 7) || sit.F.x < (late() ? 30 : 45)) return null;
     const att = sk(carrier, [["dri",3],["agi",1.5],["acc",1],["bal",1],["fla",0.7],["tec",1]]);
     const def = sk(me, [["tck",3],["pos",1.2],["ant",1],["str",1],["acc",0.8]]);
     const pw = clamp(0.5 + (att - def) * 1.3, 0.12, 0.88); // attacker's chance to beat a standing tackle

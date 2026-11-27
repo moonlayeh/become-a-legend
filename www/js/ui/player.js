@@ -262,6 +262,8 @@ register("pengaturan", "umum", (G, root) => {
       <div class="lbl" style="margin-bottom:6px">Berhenti di setiap sesi latihan</div>${seg("trainStop", [[true, "Ya"], [false, "Tidak, otomatis"]])}
       <div class="lbl" style="margin:12px 0 6px">Usaha saat latihan otomatis</div>${seg("autoEffort", Object.keys(EFFORT).map(k => [k, k]))}
       <div class="lbl" style="margin:12px 0 6px">Kecepatan awal laga 2D</div>${seg("speed", [[10, "×10"], [25, "×25"], [60, "×60"]])}
+      <div class="lbl" style="margin:12px 0 6px">Mode bermain</div>${seg("mode", [["kartu", "Kartu cepat"], ["lengkap", "Manajer lengkap"]])}
+      <p class="muted" style="font-size:12.5px;margin:4px 0 0">Kartu cepat: karier berjalan lewat kartu kehidupan dan laga dengan 3 momen kunci, latihan otomatis. Manajer lengkap: kamu atur latihan harian dan menonton laga penuh.</p>
       <div class="lbl" style="margin:12px 0 6px">Momen kunci saat menonton laga</div>${seg("moments", [["sering", "Sering"], ["normal", "Normal"], ["jarang", "Jarang"], ["mati", "Mati"]])}
       <div class="lbl" style="margin:12px 0 6px">Waktu untuk memilih</div>${seg("momentTimer", [[5, "5 dtk"], [8, "8 dtk"], [12, "12 dtk"], [0, "Tanpa batas"]])}
       <p class="muted" style="font-size:12.5px;margin-top:6px">Saat kamu memegang bola di area berbahaya atau berduel satu lawan satu, laga berhenti dan kamu memilih: tembak, umpan, giring, tekel, dan lainnya. Pilihan menentukan jalannya laga dan rating-mu.</p></div>

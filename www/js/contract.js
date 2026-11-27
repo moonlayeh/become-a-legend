@@ -222,7 +222,7 @@ export function interestedClubs(G) {
   const r = new RNG(hash(`int${G.seed}${y}${m}${p.ca}`));
   const cands = Object.values(G.clubs).filter(c => c.id !== p.club && G.leagues[c.league] && c.level >= p.ca - 8 && c.level <= p.ca + 18 && fifaU18Allowed(natFor(p, c.nation), age, c.nation).ok && clubNatOK(c, natFor(p, c.nation)) && permitOK(G, c).ok);
   const form = p.form.length ? p.form.slice(-6).reduce((s, x) => s + x, 0) / p.form.slice(-6).length : 6.6;
-  const appeal = (form - 6.6) * 0.3 + (G.user.listed ? 0.25 : 0) + (age <= 21 ? 0.1 : 0) + (G.user.agentPush ? 0.15 : 0);
+  const appeal = (form - 6.6) * 0.3 + (G.user.listed ? 0.25 : 0) + (age <= 21 ? 0.1 : 0) + (G.user.agentPush ? 0.15 : 0) + ((G.user.life?.fame ?? 30) - 30) / 220;
   const n = clamp(Math.round(2 + appeal * 6 + r.int(0, 3)), 0, 10);
   return r.shuffle(cands).slice(0, n).map(c => {
     const s = clamp(0.35 + appeal + r.float(-0.25, 0.35) + (c.level - p.ca) / 100, 0, 1);

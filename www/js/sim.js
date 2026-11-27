@@ -5,6 +5,7 @@ import { A } from "./attributes.js";
 import { fullName, shortName, newStats, fairWage } from "./player.js";
 import { simulateMatch, matchGen, FORMATIONS } from "./match.js";
 import { maybePress } from "./press.js";
+import { afterMatchLife, weeklyLife } from "./cards.js";
 import { ymd, ageOn, seasonOf, seasonLabel, fmt, day, nextWeekday } from "./calendar.js";
 import {
   userP, userClub, pickTeam, quickSim, applyLine, developPlayer, makeFixtures, addMail, addNews, table,
@@ -93,7 +94,7 @@ export function continueGame(G, maxDays = 45) {
     if (G.processed !== G.date) {
       // training comes first in the day: stop so the player can take part (or train automatically)
       if (G.user.trainDone !== G.date && trainingSessionsToday(G)) {
-        const stopHere = (G.settings?.trainStop ?? true) && !(G.user.autoTrainUntil >= G.date);
+        const stopHere = (G.settings?.trainStop ?? true) && G.settings?.mode !== "kartu" && !(G.user.autoTrainUntil >= G.date);
         if (stopHere) { G.trainingDue = true; stop = "training"; break; }
         doTraining(G, rng, (G.user.autoTrainUntil >= G.date && G.user.autoEffort) || G.settings?.autoEffort || "Normal", false, true);
       }
@@ -261,7 +262,7 @@ export function playPending(G, record) {
   const pd = G.pending; if (!pd) return null;
   const u = userP(G);
   const { H, A: Aw } = pendingTeams(G);
-  const res = withMind(G, u, () => simulateMatch(rng, H, Aw, { record: true }));
+  const res = withMind(G, u, () => simulateMatch(rng, H, Aw, { record: true, userId: u.id, mentality: pd.mentality || 0 }));
   return finishPending(G, rng, H, Aw, res, record);
 }
 // Interactive match: the screen steps the engine and answers the user's key moments.
@@ -270,10 +271,10 @@ export function startLiveMatch(G) {
   const pd = G.pending; if (!pd) return null;
   const u = userP(G);
   const { H, A: Aw } = pendingTeams(G);
-  const rate = G.settings?.moments || "normal";
+  const rate = G.settings?.mode === "kartu" ? (G.settings?.moments === "mati" ? "mati" : "kartu") : G.settings?.moments || "normal";
   const interactive = rate !== "mati" && ["XI", "Cadangan"].includes(pd.role);
   const sink = { frames: [], events: [], shots: [] };
-  const gen = matchGen(rng, H, Aw, { record: true, interactive, userId: u.id, momentRate: rate, sink });
+  const gen = matchGen(rng, H, Aw, { record: true, interactive, userId: u.id, momentRate: rate, sink, mentality: pd.mentality || 0 });
   const info = {};
   [H, Aw].forEach((t, side) => [...t.xi, ...t.bench].forEach(p => (info[p.id] = { name: shortName(p), full: fullName(p), num: numOf(G, p.id, t), side, user: !!p.isUser })));
   const shortOf = t => G.clubs[t.club]?.short || (t.nat ? t.nat : t.name.slice(0, 3).toUpperCase());
@@ -356,6 +357,7 @@ function finishPending(G, rng, H, Aw, res, record) {
     const me = summary.user, side = me.side, gf = res.score[side], ga = res.score[1 - side];
     maybePress(G, rng, { opp: side === 0 ? Aw.name : H.name, gls: me.gls, pom: res.pom === u.id, rc: me.rc > 0, debut, final: /Final/.test(comp || "") && !/Semifinal|Perempat/.test(comp || ""), start: me.start, sub: !me.start, won: gf > ga, lost: gf < ga, ntPossible: ageOn(u.birth, G.date) >= 17 });
   }
+  if (summary.user) afterMatchLife(G, rng, summary, res, { big: /Final/.test(comp || "") || pd.kind === "timnas" });
   // running career totals (all competitive and friendly matches the player appeared in)
   if (summary.user && pd.kind !== "friendly") {
     const me = summary.user, side = me.side, gf = res.score[side], ga = res.score[1 - side];
@@ -535,7 +537,7 @@ function weekly(G, rng) {
     }
     if (G.user.training.intensity === "Tinggi") u.cond = Math.max(60, u.cond - 4);
     if (!trained) trainingRating(G, rng);
-    payWeek(G); weeklyResidency(G);
+    payWeek(G); weeklyResidency(G); weeklyLife(G);
     weeklyCareer(G, rng);
   }
   const { m } = ymd(G.date);

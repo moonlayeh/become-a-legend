@@ -8,6 +8,7 @@ import { userP } from "../world.js";
 import { fullName } from "../player.js";
 import { pendingTeams, teamColors, playPending, numOf, startLiveMatch, stepLive, endLiveMatch, matchCharts } from "../sim.js";
 import { MOMENT_LABEL } from "../match.js";
+import { momentCardHtml, attachSwipe } from "./kartu.js";
 import { PitchPlayer, kitPair } from "../viewer.js";
 import { formationPitch } from "./club.js";
 
@@ -51,10 +52,12 @@ function lineupPlates(G, T, col) {
     return `<div class="pl ${q.isUser ? "me" : ""}" style="left:${x}%;top:${y}%">${avatar(lookFor(q), col, 34, ageOn(q.birth, S.G.date))}<div class="plate"><span class="nn" style="background:${col[0]};color:${ink}">${numOf(G, q.id, T)}</span><span class="pn">${esc(q.ln)}</span></div></div>`;
   }).join("");
 }
+export const startWatch = G => play(G, true);
+const kartuMode = G => G.settings?.mode === "kartu";
 function play(G, watch) {
   const ld = document.createElement("div"); ld.className = "loading"; ld.innerHTML = '<div><div class="spin"></div>Pertandingan dimulai…</div>'; document.body.appendChild(ld);
   setTimeout(() => {
-    if (!watch) { playPending(G, true); save(); ld.remove(); go("laga", "hasil", {}, true); return; }
+    if (!watch) { playPending(G, true); save(); ld.remove(); go(kartuMode(G) ? "main" : "laga", "hasil", {}, true); return; }
     const ctx = startLiveMatch(G);
     ld.remove();
     live(G, ctx);
@@ -122,6 +125,18 @@ function live(G, ctx) {
     const m = ctx.moment; if (!m) { if (ctx.res) settle(); pp.waiting = false; return; }
     const box = $("#moment", el);
     const lim = G.settings?.momentTimer ?? 8;
+    if (kartuMode(G)) {
+      // card mode: the moment is a big two-choice card, swiped like the life cards
+      const mc = momentCardHtml(G, R, m);
+      box.className = "moment kartu";
+      box.innerHTML = `<div class="spread" style="margin-bottom:6px"><b style="color:#ffd54a">MOMEN KUNCI ${Math.min(3, (ctx.mIdx = (ctx.mIdx || 0) + 1))}/3 · ${esc(m.min)}'</b>${lim ? `<span class="muted" id="mcount">${lim} dtk</span>` : ""}</div>${lim ? `<div class="mbar"><i id="mbar"></i></div>` : ""}${mc.html}<p class="muted" style="text-align:center;font-size:12px;margin:6px 0 0">Geser untuk memilih</p>`;
+      box.hidden = false;
+      attachSwipe($(".gwrap", box), mc.labels, i => choose(mc.keys[i]));
+      box.querySelectorAll("[data-mk]").forEach(b => (b.onclick = () => choose(b.dataset.mk)));
+      if (lim) { const t0 = performance.now(); timer = setInterval(() => { if (pp.paused) return; const left = lim - (performance.now() - t0) / 1000; const cc = $("#mcount", el), bar = $("#mbar", el); if (cc) cc.textContent = `${Math.max(0, Math.ceil(left))} dtk`; if (bar) bar.style.width = `${Math.max(0, left / lim) * 100}%`; if (left <= 0) choose(null); }, 100); }
+      if (navigator.vibrate) try { navigator.vibrate(40); } catch {}
+      return;
+    }
     const vs = m.vs ? esc(R.info[m.vs]?.name || "Lawan") : "";
     const head = m.kind === "atk"
       ? `Bola di kakimu di ${esc(m.zone)}${m.dG ? `, ${m.dG} m dari gawang` : ""}${m.pressure < 2 ? ", lawan menempel ketat" : ""}.`
@@ -167,10 +182,11 @@ function live(G, ctx) {
     onEnd: () => { settle(); say(`<b>Peluit panjang.</b> ${esc(R.names[0])} ${Sm.score[0]}-${Sm.score[1]} ${esc(R.names[1])}`, true); const b = el.querySelector('[data-a="end"]'); b.textContent = "Lihat hasil"; $("#ls", el).textContent = `${Sm.score[0]} - ${Sm.score[1]}`; paintPanel(G, R, Sm, pp, tab, $("#lpanel", el), lines); },
   });
   if (ctx.res) settle();
-  pp.speed = G.settings?.speed || 25;
+  pp.speed = kartuMode(G) ? 60 : G.settings?.speed || 25;
+  if (kartuMode(G)) { pp.hlFast = 150; pp.nearSlow = 9; pp.nearWin = [8, 3]; pp.keyKinds = ["shot", "goal", "pen"]; pp.keyT = []; pp.keySeen = 0; pp.sync(); }
   $$("[data-s]", el).forEach(x => x.setAttribute("aria-pressed", +x.dataset.s === pp.speed));
   const skip = () => { clearInterval(timer); $("#moment", el).hidden = true; settle(); pp.waiting = false; pp.finish(); };
-  const close = () => { clearInterval(timer); pp.destroy(); el.remove(); window.removeEventListener("popstate", onPop); go("laga", "hasil", {}, true); };
+  const close = () => { clearInterval(timer); pp.destroy(); el.remove(); window.removeEventListener("popstate", onPop); go(kartuMode(G) ? "main" : "laga", "hasil", {}, true); };
   const onPop = () => { if (pp.done) close(); else { skip(); history.pushState({ live: true }, ""); } };
   window.addEventListener("popstate", onPop);
   el.addEventListener("click", e => {
@@ -315,5 +331,5 @@ register("laga", "hasil", (G, root) => {
   <div class="card"><div class="ch">${esc(Sm.homeShort)} Formasi</div>${fm(0)}<div class="ch" style="margin-top:12px">${esc(Sm.awayShort)} Formasi</div>${fm(1)}</div>
   <div class="card"><div class="ch">${esc(Sm.home.name)} · Peta Tembakan</div>${shotBox(0)}<div class="ch" style="margin-top:12px">${esc(Sm.away.name)} · Peta Tembakan</div>${shotBox(1)}</div>
   <div class="card"><div class="ch">Rating Pemain</div><div class="tscroll"><table class="tbl"><thead><tr><th>${esc(Sm.home.name)}</th><th></th><th class="n">Mnt</th><th class="n">G</th><th class="n">A</th><th>Rating</th></tr></thead><tbody>${rt(0)}</tbody></table><table class="tbl" style="margin-top:10px"><thead><tr><th>${esc(Sm.away.name)}</th><th></th><th class="n">Mnt</th><th class="n">G</th><th class="n">A</th><th>Rating</th></tr></thead><tbody>${rt(1)}</tbody></table></div></div>`;
-  $("#cont", root).onclick = () => { go("portal", "ringkasan", {}, true); S.onGo?.(); };
+  $("#cont", root).onclick = () => { if (kartuMode(G)) { go("main", "kartu", {}, true); return; } go("portal", "ringkasan", {}, true); S.onGo?.(); };
 });
