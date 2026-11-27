@@ -68,6 +68,8 @@ export function sceneSvg(G, sc, seed, opts = {}) {
   return `<svg viewBox="0 0 300 220" class="gart" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${BG[bg] || BG.stadium}${people}${propSvg}</svg>`;
 }
 const RCOL = { BIASA: "#cfd8e6", PERUNGGU: "#ef8a3c", EMAS: "#ffcc33" };
+// optional painted illustration: www/img/cards/<id>.webp replaces the drawn scene when present
+export const cardArt = (G, sc, id) => `<div class="gpic">${sceneSvg(G, sc, id)}<img src="img/cards/${id}.webp" alt="" class="gphoto" onerror="this.remove()"></div>`;
 export function gcard({ cat, r = "BIASA", art, title, text, extra = "" }) {
   return `<div class="gcard r-${r}" style="--rc:${RCOL[r] || RCOL.BIASA}"><div class="gtop"><span class="gcat">${esc(cat)}</span><span class="grar">${r === "BIASA" ? "" : "★ "}${esc(r)}</span></div><div class="gimg">${art}</div><div class="gbody"><div class="gtitle">${esc(title)}</div><div class="gtext">${esc(text)}</div>${extra}</div></div>`;
 }
@@ -134,7 +136,7 @@ register("main", "hidup", (G, root) => {
 register("main", "koleksi", (G, root) => {
   const L = life(G), have = EVENTS.filter(e => L.cards[e.id]).length;
   root.innerHTML = hud(G) + `<div class="card"><div class="spread"><b>🃏 Koleksiku</b><span class="muted">${have}/${EVENTS.length} kartu</span></div><div class="gbar"><i style="width:${have / EVENTS.length * 100}%"></i></div></div>
-    <div class="album">${EVENTS.map(e => L.cards[e.id] ? `<div class="acard r-${e.r}" style="--rc:${RCOL[e.r]}"><div class="aimg">${sceneSvg(G, e.sc, e.id)}</div><b>${esc(e.t)}</b><small>${e.cat} · ${L.cards[e.id]}×</small></div>` : `<div class="acard lock"><div class="aimg lockimg">?</div><b>???</b><small>${e.cat}</small></div>`).join("")}</div>`;
+    <div class="album">${EVENTS.map(e => L.cards[e.id] ? `<div class="acard r-${e.r}" style="--rc:${RCOL[e.r]}"><div class="aimg">${cardArt(G, e.sc, e.id)}</div><b>${esc(e.t)}</b><small>${e.cat} · ${L.cards[e.id]}×</small></div>` : `<div class="acard lock"><div class="aimg lockimg">?</div><b>???</b><small>${e.cat}</small></div>`).join("")}</div>`;
 });
 
 // ---------- TROFI ----------
@@ -172,7 +174,7 @@ const goNext = G => { clearCard(G); save(); go("main", "kartu", {}, true); };
 function lifeCard(G, root, c) {
   const e = evById(c.id); if (!e) { goNext(G); return; }
   const L = life(G);
-  root.innerHTML = hud(G) + `<div class="gwrap"><div class="ghint"></div>${gcard({ cat: e.cat, r: e.r, art: sceneSvg(G, e.sc, e.id), title: e.t, text: e.x })}</div>
+  root.innerHTML = hud(G) + `<div class="gwrap"><div class="ghint"></div>${gcard({ cat: e.cat, r: e.r, art: cardArt(G, e.sc, e.id), title: e.t, text: e.x })}</div>
     <div class="gbtns"><button class="gb l" data-pick="0"><span>✖</span>${esc(e.o[0][0])}</button>${L.stars > 0 ? `<button class="gb s" data-pick="super"><span>⭐</span>Pilihan super</button>` : ""}<button class="gb r" data-pick="1"><span>♥</span>${esc(e.o[1][0])}</button></div>
     <p class="muted" style="text-align:center;font-size:12px">Geser kartu ke kiri atau kanan untuk memilih</p>`;
   const pick = p => { const rng = rngOf(G); G.card = chooseLife(G, rng, c, p); G.rs = rng.s; save(); render(); };
@@ -181,7 +183,7 @@ function lifeCard(G, root, c) {
 }
 function outcomeCard(G, root, c) {
   const e = evById(c.id);
-  root.innerHTML = hud(G) + gcard({ cat: e?.cat || "HASIL", r: e?.r, art: sceneSvg(G, e?.sc || ["stadium", null, "✨"], (e?.id || "") + "o"), title: c.choice, text: c.text, extra: `${c.superUsed ? '<div class="gsuper">⭐ Pilihan super dipakai</div>' : ""}${c.inj ? `<div class="ginj">✚ ${esc(c.inj)}</div>` : ""}${deltaRow(G, c.delta)}` }) + nextBtn();
+  root.innerHTML = hud(G) + gcard({ cat: e?.cat || "HASIL", r: e?.r, art: e ? cardArt(G, e.sc, e.id) : sceneSvg(G, ["stadium", null, "✨"], "o"), title: c.choice, text: c.text, extra: `${c.superUsed ? '<div class="gsuper">⭐ Pilihan super dipakai</div>' : ""}${c.inj ? `<div class="ginj">✚ ${esc(c.inj)}</div>` : ""}${deltaRow(G, c.delta)}` }) + nextBtn();
   $("#gnext", root).onclick = () => goNext(G);
 }
 function noteCard(G, root, c) {

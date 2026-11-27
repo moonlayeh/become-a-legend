@@ -505,3 +505,5 @@ main.page { padding: 10px 10px calc(var(--bot) + 24px); max-width: 980px; margin
 .gmini small { display: block; opacity: .75; font-size: 11.5px; margin-top: 2px; }
 .moment.kartu { top: 0; max-height: none; background: rgba(8,8,20,.94); border-top: 0; padding-top: calc(12px + env(safe-area-inset-top)); }
 .moment.kartu .gtitle { font-size: 24px; }
+.gpic { position: relative; }
+.gphoto { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
