@@ -106,3 +106,18 @@ export async function loadGame(backup = false) {
   } catch (e) { console.warn("load failed", e); return backup ? null : loadGame(true); }
 }
 export async function deleteSave() { await del(KEY); await del(BACKUP); }
+
+// ---------- backup files (so a career survives reinstalling the app or moving phones) ----------
+export async function exportBytes(G) {
+  const z = await gz(serialize(G));
+  return typeof z === "string" ? new TextEncoder().encode(z) : new Uint8Array(z);
+}
+export async function importBytes(buf) {
+  const u8 = new Uint8Array(buf);
+  const str = u8[0] === 0x1f && u8[1] === 0x8b ? await gunzip(u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)) : new TextDecoder().decode(u8);
+  let G = null;
+  try { G = deserialize(str); } catch { throw new Error("File ini bukan save Become a Legend."); }
+  if (!G || !G.players || !G.user || G.user.pid == null) throw new Error("File ini bukan save Become a Legend.");
+  await saveGame(G);
+  return G;
+}

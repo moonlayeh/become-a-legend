@@ -11,6 +11,7 @@ import { canSwitch } from "../intl.js";
 import { shirtNumber, rngOf } from "../sim.js";
 import { ROLES, roleStars, bestRole, attrHighlights, positionString, PITCH_XY, famWord, FAM_WORDS, reputation, REP_COLOR, footWord, footLevel, fitnessWord, moraleWord, moraleFace, severity, severityWord, returnRange, clubMatchDays, staffOf, SESS, SESS_COLOR, userMatchDays } from "../meta.js";
 import { STYLES } from "../world.js";
+import { exportSave } from "./backup.js";
 
 const FOCUS_ATTRS = {
   Teknik: ["dri", "fir", "tec", "pas", "cro"], Penyelesaian: ["fin", "cmp", "otb", "lon", "hea"], Kreatif: ["vis", "pas", "fla", "dec", "tec"],
@@ -262,6 +263,8 @@ register("pengaturan", "umum", (G, root) => {
       <div class="lbl" style="margin-bottom:6px">Berhenti di setiap sesi latihan</div>${seg("trainStop", [[true, "Ya"], [false, "Tidak, otomatis"]])}
       <div class="lbl" style="margin:12px 0 6px">Usaha saat latihan otomatis</div>${seg("autoEffort", Object.keys(EFFORT).map(k => [k, k]))}
       <div class="lbl" style="margin:12px 0 6px">Kecepatan awal laga 2D</div>${seg("speed", [[10, "×10"], [25, "×25"], [60, "×60"]])}
+      <div class="lbl" style="margin:12px 0 6px">Cadangan save</div><button class="btn sm" id="expsave" style="width:100%">💾 Cadangkan save ke file</button>
+      <p class="muted" style="font-size:12.5px;margin:4px 0 0">Simpan file ini (misalnya ke Google Drive). Kalau aplikasi terhapus atau pindah HP, pulihkan dari menu utama → Pulihkan dari file.</p>
       <div class="lbl" style="margin:12px 0 6px">Mode bermain</div>${seg("mode", [["kartu", "Kartu cepat"], ["lengkap", "Manajer lengkap"]])}
       <p class="muted" style="font-size:12.5px;margin:4px 0 0">Kartu cepat: karier berjalan lewat kartu kehidupan dan laga dengan 3 momen kunci, latihan otomatis. Manajer lengkap: kamu atur latihan harian dan menonton laga penuh.</p>
       <div class="lbl" style="margin:12px 0 6px">Momen kunci saat menonton laga</div>${seg("moments", [["sering", "Sering"], ["normal", "Normal"], ["jarang", "Jarang"], ["mati", "Mati"]])}
@@ -277,4 +280,5 @@ register("pengaturan", "umum", (G, root) => {
     save(); render();
   }));
   $("#savenow", root).onclick = () => { save(); toast("Karier disimpan."); };
+  $("#expsave", root).onclick = async () => { try { await save(); await exportSave(G); } catch (e) { console.warn(e); toast("Gagal membuat cadangan."); } };
 });

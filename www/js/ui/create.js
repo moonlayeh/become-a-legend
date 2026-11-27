@@ -9,6 +9,7 @@ import { RNG } from "../rng.js";
 import { STYLES, TRAITS, LANGS, buildUser, fifaU18Allowed, CITY, userP, userClub, VERSION, POTENTIAL } from "../world.js";
 import { newCareer } from "../sim.js";
 import { saveGame, loadGame, deleteSave } from "../save.js";
+import { exportSave, pickAndImport } from "./backup.js";
 import { personality, fullName } from "../player.js";
 import { abilityWord, WORD_COLOR, PITCH_XY, clubReputation, REP_COLOR, facilities, clubCulture, predictedFinish, hash } from "../meta.js";
 import { bestXI, formationPitch } from "./club.js";
@@ -39,12 +40,15 @@ export async function mainMenu(done) {
     <div class="logo">Become a<br><span>Legend</span></div>
     <button class="mcard hero" id="new"><h2>Mulai Karier Baru</h2><p>Buat pemainmu sendiri dan tempa jalan dari akademi sampai pensiun.</p></button>
     <button class="mcard" id="load" ${g ? "" : "disabled"}><h2>Muat Karier</h2><p>${g ? `${esc(fullName(u))} · ${esc(g.clubs[u.club]?.name || "")} · ${fmt(g.date)}` : old ? "Karier lama dibuat dengan versi sebelumnya (data liga 2025/26) dan tidak bisa dimuat di versi ini. Mulai karier baru untuk memakai data 2026/27." : "Belum ada karier tersimpan di perangkat ini."}</p></button>
+    <div class="row" style="gap:8px;margin-top:8px">${g ? '<button class="btn sm" id="exp" style="flex:1">💾 Cadangkan save</button>' : ""}<button class="btn sm" id="imp" style="flex:1">📂 Pulihkan dari file</button></div>
     ${g || old ? '<button class="btn danger sm" id="wipe" style="margin-top:6px">Hapus karier tersimpan</button>' : ""}
     <div id="aboutbox"></div>
     <p class="muted" style="font-size:12.5px;margin-top:24px">Klub dan liga memakai nama asli; semua pemain, pelatih, dan staf adalah tokoh fiktif.</p></div>`;
   $("#about").onclick = () => { const b = $("#aboutbox"); b.innerHTML = b.innerHTML ? "" : ABOUT; };
   $("#new").onclick = () => { if (g && !confirm("Karier lama akan ditimpa setelah karier baru dibuat. Lanjutkan?")) return; startWizard(); };
   if (g) $("#load").onclick = () => done(g);
+  $("#exp")?.addEventListener("click", async () => { try { await exportSave(g); } catch (e) { console.warn(e); toast("Gagal membuat cadangan."); } });
+  $("#imp").onclick = () => { if (g && !confirm("Karier yang ada di perangkat ini akan diganti dengan isi file. Lanjutkan?")) return; pickAndImport(() => mainMenu(done)); };
   $("#wipe")?.addEventListener("click", async () => { if (confirm("Hapus karier ini secara permanen?")) { await deleteSave(); mainMenu(done); } });
 }
 
