@@ -68,8 +68,8 @@ export function sceneSvg(G, sc, seed, opts = {}) {
   return `<svg viewBox="0 0 300 220" class="gart" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${BG[bg] || BG.stadium}${people}${propSvg}</svg>`;
 }
 const RCOL = { BIASA: "#cfd8e6", PERUNGGU: "#ef8a3c", EMAS: "#ffcc33" };
-// optional painted illustration: www/img/cards/<id>.webp replaces the drawn scene when present
-export const cardArt = (G, sc, id) => `<div class="gpic">${sceneSvg(G, sc, id)}<img src="img/cards/${id}.webp" alt="" class="gphoto" onerror="this.remove()"></div>`;
+// optional painted illustration: www/img/cards/<id>.png (or .jpg/.webp) replaces the drawn scene when present
+export const cardArt = (G, sc, id) => `<div class="gpic">${sceneSvg(G, sc, id)}<img src="img/cards/${id}.png" alt="" class="gphoto" onerror="const n={png:'jpg',jpg:'webp'}[this.src.split('.').pop()];if(n)this.src=this.src.replace(/\\.\\w+$/,'.'+n);else this.remove()"></div>`;
 export function gcard({ cat, r = "BIASA", art, title, text, extra = "" }) {
   return `<div class="gcard r-${r}" style="--rc:${RCOL[r] || RCOL.BIASA}"><div class="gtop"><span class="gcat">${esc(cat)}</span><span class="grar">${r === "BIASA" ? "" : "★ "}${esc(r)}</span></div><div class="gimg">${art}</div><div class="gbody"><div class="gtitle">${esc(title)}</div><div class="gtext">${esc(text)}</div>${extra}</div></div>`;
 }

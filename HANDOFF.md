@@ -34,7 +34,7 @@ Layar didaftarkan dengan `register(section, tab, (G, root, params) => ...)` dan 
 State seluruh gim ada di satu objek `G` (disimpan dengan `save()`).
 
 ## Ide paling berdampak untuk visual
-1. **Ilustrasi kartu**: taruh gambar `www/img/cards/<id>.webp` (rasio 300:220). Kalau ada, gambar itu otomatis
+1. **Ilustrasi kartu**: taruh gambar `www/img/cards/<id>.png` (atau .jpg/.webp, rasio sekitar 4:3). Kalau ada, gambar itu otomatis
    menggantikan gambar SVG bawaan. Id kartu ada di `EVENTS` di `cards.js`.
 2. Animasi transisi kartu, efek partikel/kilau untuk kartu Emas, suara.
 3. Ilustrasi untuk momen kunci laga (`momentCardHtml` di `ui/kartu.js`) dan beranda (`main/beranda`).
